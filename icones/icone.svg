@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Icône de l'appli — style « Affiche + soleil de fond ».
+       Le petit ruban crème (signet) qui pend du haut = ma signature, commune à mes applis. -->
+  <defs>
+    <linearGradient id="degrade" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#bc9672"></stop><stop offset="1" stop-color="#9f7146"></stop></linearGradient>
+    <clipPath id="cadre"><rect rx="22"></rect></clipPath>
+  </defs>
+  <g clip-path="url(#cadre)">
+    <rect fill="url(#degrade)"></rect>
+    <circle cx="64" cy="38" r="40" fill="#caab8f" opacity=".55"></circle>
+    <g transform="translate(-21 -3) scale(1.42)"><path d="M22 46h52v40H22z" fill="#FFF6E6"></path><path d="M22 43h23l-7-12H13z" fill="#FFF6E6"></path><path d="M51 43h23l9-12H58z" fill="#FFF6E6"></path><path d="M40 58h16" fill="none" stroke="#5d4229" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M48 6a10 10 0 0 1 10 10c0 8-10 17-10 17s-10-9-10-17A10 10 0 0 1 48 6z" fill="#26304F"></path><path d="M44 16a4 4 0 1 0 8 0a4 4 0 1 0-8 0z" fill="#FFF6E6"></path></g>
+    <path d="M79 0h12v25l-6-5-6 5z" fill="#000" opacity=".2" transform="translate(1.5 1.5)"></path>
+    <path d="M79 0h12v25l-6-5-6 5z" fill="#FFF6E6"></path>
+  </g>
+</svg>

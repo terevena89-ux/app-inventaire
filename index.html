@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>Inventaire</title>
+  <meta name="description" content="Où sont rangés mes objets.">
+  <meta name="theme-color" content="#F6F4EF">
+  <script>
+    // Thème (auto / clair / sombre) et animations, posés AVANT l'affichage (pas de flash blanc).
+    (function () {
+      var choix = "auto", anim = "completes";
+      try { var r = JSON.parse(localStorage.getItem("inv-reglages")) || {}; choix = r.theme || "auto"; anim = r.animations || "completes"; } catch (e) {}
+      document.documentElement.dataset.anim = anim;
+      var sombreTel = matchMedia("(prefers-color-scheme: dark)");
+      function appliquer() {
+        var theme = choix === "auto" ? (sombreTel.matches ? "sombre" : "clair") : choix;
+        document.documentElement.dataset.theme = theme;
+        document.querySelector('meta[name="theme-color"]').content = theme === "sombre" ? "#171c24" : "#F6F4EF";
+      }
+      appliquer();
+      sombreTel.addEventListener("change", appliquer);
+      window.appliquerTheme = function (nouveau) { choix = nouveau; appliquer(); };
+    })();
+  </script>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icones/icone.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icones/icone-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section id="ecran-connexion" class="ecran" hidden>
+  <div class="connexion">
+    <img src="icones/icone.svg" alt="" width="72" height="72">
+    <h1>Inventaire</h1>
+    <button id="btn-connexion" class="btn plein">Se connecter avec Google</button>
+    <p id="connexion-erreur" class="erreur" hidden></p>
+  </div>
+</section>
+
+<section id="ecran-accueil" class="ecran" hidden>
+  <header class="barre">
+    <h1 class="logo">Inventaire</h1>
+    <button class="btn-icone" id="btn-ajouter" aria-label="Ajouter"><svg class="ic"><use href="icones/icones.svg#plus"></use></svg></button>
+    <button class="btn-icone" data-aller="reglages" aria-label="Réglages"><svg class="ic"><use href="icones/icones.svg#settings"></use></svg></button>
+  </header>
+  <div class="recherche">
+    <svg class="ic"><use href="icones/icones.svg#search"></use></svg>
+    <input id="recherche" type="search" placeholder="Rechercher" aria-label="Rechercher">
+    <button class="btn-icone petit" id="effacer-recherche" aria-label="Effacer" hidden><svg class="ic"><use href="icones/icones.svg#x"></use></svg></button>
+  </div>
+  <!-- Fil d'Ariane (Tout › Appart › Chambre) : on peut aussi y lâcher un objet glissé -->
+  <nav id="fil" class="fil"></nav>
+  <div id="courant" class="courant" hidden></div>
+  <div id="liste" class="liste"></div>
+</section>
+
+<section id="ecran-reglages" class="ecran modale" hidden>
+  <div class="fenetre-c" role="dialog" aria-label="Réglages">
+    <div class="fhd"><h2 class="titre">Réglages</h2>
+      <button class="btn-icone" data-aller="accueil" aria-label="Fermer"><svg class="ic"><use href="icones/icones.svg#x"></use></svg></button></div>
+    <div class="sect">Compte</div>
+    <div class="groupe">
+      <div class="reg"><span id="compte-info" class="resume"></span>
+        <span class="synchro"><svg class="ic"><use href="icones/icones.svg#cloud-check"></use></svg><span class="synchro-texte">Synchronisé</span></span></div>
+      <button class="reg" id="btn-deconnexion"><span>Se déconnecter</span><svg class="ic"><use href="icones/icones.svg#logout"></use></svg></button>
+    </div>
+    <div class="sect">Apparence</div>
+    <div class="groupe">
+      <button class="reg" data-aller="theme"><span>Thème</span><span class="val"><span id="theme-actuel"></span><svg class="ic"><use href="icones/icones.svg#chevron-right"></use></svg></span></button>
+      <div class="reg"><span>Animations</span>
+        <div id="choix-animations" class="seg">
+          <button data-anim-choix="completes">Complètes</button>
+          <button data-anim-choix="simples">Simples</button>
+        </div>
+      </div>
+      <button class="reg" id="ouvrir-notes"><span>Notes</span><span class="val"><svg class="ic"><use href="icones/icones.svg#chevron-right"></use></svg></span></button>
+    </div>
+    <div class="sect">Excel</div>
+    <div class="deux">
+      <button class="btn" id="btn-export"><svg class="ic"><use href="icones/icones.svg#download"></use></svg>Exporter</button>
+      <button class="btn" id="btn-import"><svg class="ic"><use href="icones/icones.svg#upload"></use></svg>Importer</button>
+      <input type="file" id="fichier-import" accept=".xlsx" hidden>
+    </div>
+    <p class="version"><span id="version"></span></p>
+  </div>
+</section>
+
+<section id="ecran-theme" class="ecran modale" hidden>
+  <div class="fenetre-c" role="dialog" aria-label="Thème">
+    <button class="retour" data-aller="reglages">‹ Réglages</button>
+    <h2 class="titre">Thème</h2>
+    <div id="choix-theme" class="groupe">
+      <button class="reg" data-theme-choix="auto"><span>Auto</span><span class="radio"></span></button>
+      <button class="reg" data-theme-choix="clair"><span>Clair</span><span class="radio"></span></button>
+      <button class="reg" data-theme-choix="sombre"><span>Sombre</span><span class="radio"></span></button>
+    </div>
+  </div>
+</section>
+
+<!-- Fiche, formulaire, « Déplacer » : remplis par app.js -->
+<div id="voile" class="voile" hidden></div>
+
+<div id="toast" class="toast" hidden>
+  <span id="toast-texte"></span>
+  <button id="toast-annuler">Annuler</button>
+</div>
+
+<script src="champs-mobile.js" defer></script>
+<script src="notes-idees.js" defer></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
