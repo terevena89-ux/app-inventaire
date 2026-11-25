@@ -1,5 +1,14 @@
 # Inventaire — journal des nouveautés
 
+## 0.7.0 — 2026-11-25
+Plan et sensations.
+- Plan de l'accueil (et « Voir l'endroit ») sans noms ; portes dessinées d'un seul trait.
+- Plan de l'accueil qui tourne librement à deux doigts, comme une carte ; orientation retenue sur ce téléphone ; boussole pour remettre le nord en haut.
+- Mode « Libre » (ex-Angles) : coins déplacés sans grille, aimantés sur un autre coin, à angle droit ou à 45° des murs voisins, ou alignés avec un coin.
+- Couleur au choix pour chaque élément (8 pastels) : tuile de l'icône dans les listes et l'escalier, liseré dans la vue de face. Gardée dans l'Excel.
+- Vibrations (réglage Oui / Non) : prendre, ouvrir au survol, poser, aimants du plan, enregistrer, cocher, quantité, sortir.
+- Animations : l'objet glissé file vers sa place et la ligne rebondit ; fiches qui montent avec un léger ressort ; la liste glisse de droite en entrant, de gauche en remontant ; coche dessinée à l'enregistrement ; éclat de confettis quand « Tout est là » ; quantité qui roule.
+
 ## 0.6.0 — 2026-11-25
 Navigation et listes.
 - Onglets en bas : Maison, Objets, Escalier.

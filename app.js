@@ -16,11 +16,11 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { ajouterFeuille, telechargerClasseur, lireClasseur, chargerExcelJS } from "./excel-style.js";
-import { normaliserPlan, planVide, vueHTML, ouvrirEditeur, fermerEditeur, editeurOuvert, cadrage, contenuSVG } from "./plan.js";
+import { normaliserPlan, planVide, vueHTML, ouvrirEditeur, fermerEditeur, editeurOuvert, cadrage, svgVue, boiteTournee, centrePlan } from "./plan.js";
 
 // ---------- 1. Base et données ----------
 
-const VERSION = "v0.6.0";
+const VERSION = "v0.7.0";
 const NOM_APPLI = "app-inventaire";
 
 // Tout est un « élément » (lieu, pièce, meuble, boîte, objet) rangé dans un autre (parent).
@@ -43,7 +43,7 @@ let elements = new Map();     // id -> élément
 let donnees = { idees: "" };  // document général (Réglages › Notes)
 
 const CLE_REGLAGES = "inv-reglages";
-let reglages = { theme: "auto", animations: "completes" };
+let reglages = { theme: "auto", animations: "completes", vibrations: true };
 try { Object.assign(reglages, JSON.parse(localStorage.getItem(CLE_REGLAGES)) || {}); } catch (e) { /* défauts */ }
 function changerReglage(nom, valeur) {
   reglages[nom] = valeur;
@@ -73,6 +73,7 @@ function normaliser(id, d) {
     cree: Number(d.cree) || 0,
     plan: normaliserPlan(d.plan),        // seulement pour un lieu (plan.js)
     facade: normaliserFacade(d.facade),  // seulement pour un meuble (vue de face)
+    couleur: COULEURS.includes(d.couleur) ? d.couleur : "",   // tuile de l'icône (au choix)
     principal: !!d.principal,           // lieu montré en grand sur l'accueil (étoile)
     etat: ETATS[d.etat] ? d.etat : "",   // pastille : à ranger / introuvable
     mobile: !!d.mobile,                  // objet qui bouge souvent (pas d'endroit fixe)
@@ -84,6 +85,7 @@ function normaliser(id, d) {
   };
 }
 const ETATS = { aranger: "À ranger", introuvable: "Introuvable" };
+const COULEURS = ["jaune", "corail", "rose", "violet", "bleu", "turquoise", "vert", "gris"];
 const RAISONS = { jete: "Jeté", donne: "Donné", vendu: "Vendu", perdu: "Perdu", autre: "Autre" };
 // Achat = { date, garantie (AAAA-MM-JJ), prix (€), facture (photo) } ; null si rien n'est rempli
 function normaliserAchat(a) {
@@ -292,8 +294,16 @@ function router() {
     return;
   }
   montrer("accueil");
+  const avant = dansId;
   if (cle === "dans") dansId = elements.has(val) ? val : "";
   else if (!cle) dansId = "";
+  // Glissement doux : entrer dans un contenant = la liste arrive de droite, remonter = de gauche
+  if (avant !== dansId && !animationsReduites()) {
+    const entre = !avant || (elements.get(dansId) && ancetres(elements.get(dansId)).some(a => a.id === avant));
+    const dx = entre ? 26 : -26;
+    requestAnimationFrame(() => ["courant", "plan", "facade", "liste"].forEach(i => $(i).animate(
+      [{ transform: `translateX(${dx}px)`, opacity: .35 }, { transform: "none", opacity: 1 }], { duration: 220, easing: "cubic-bezier(.2,.8,.3,1)" })));
+  }
   // Onglet du bas : #objets / #escalier ; un endroit ouvert = onglet Maison ; une fiche garde l'onglet en cours
   if (cle === "objets" || cle === "escalier") onglet = cle;
   else if (cle === "dans" || !cle) onglet = "maison";
@@ -325,6 +335,7 @@ function ouvrirPlan(id) {
       texte: simplifier(e.nom + " " + cheminTexte(e))
     })).sort((a, b) => a.chemin.localeCompare(b.chemin, "fr") || a.nom.localeCompare(b.nom, "fr")),
     enregistrer: plan => { const l = elements.get(id); if (l) ecrire([{ ...l, plan }]); },
+    vibrer,
     fermer: () => retour()
   });
 }
@@ -370,7 +381,7 @@ function facadeHTML(cols, o = {}) {
       const e = elements.get(k.id), kids = o.mini ? [] : enfants(k.id);
       return sepH(ci, ki) + `<div class="fa-case g-${k.genre}${k.id && k.id === o.focus ? " actif" : ""}" style="flex:${k.h}"${o.mini ? "" : ` data-case="${k.id}" data-ci="${ci}" data-ki="${ki}"`}>
         <span class="fa-nom">${echapper(o.mini ? "" : e?.nom)}</span>
-        ${kids.length ? `<div class="fa-contenu">${kids.map(x => `<span class="fa-boite${estContenant(x) ? " contenant" : ""}${x.id === o.objet ? " actif" : ""}" data-ouvre="${x.id}">${x.photo ? `<img src="${x.photo}" alt="">` : ""}${echapper(x.nom)}</span>`).join("")}</div>` : ""}
+        ${kids.length ? `<div class="fa-contenu">${kids.map(x => `<span class="fa-boite${estContenant(x) ? " contenant" : ""}${x.id === o.objet ? " actif" : ""}${x.couleur ? " coul-" + x.couleur : ""}" data-ouvre="${x.id}">${x.photo ? `<img src="${x.photo}" alt="">` : ""}${echapper(x.nom)}</span>`).join("")}</div>` : ""}
       </div>`;
     }).join("")
     + (o.edition ? `<button class="fa-plus" data-fa="ajout-case" data-ci="${ci}" aria-label="Ajouter une case">${icone("plus")}</button>` : "")
@@ -518,7 +529,11 @@ function afficherPlan(cur) {
     return;
   }
   const chaine = [cur, ...ancetres(cur).reverse()].map(x => x.id);
-  zone.innerHTML = vueHTML(lieu.plan, { chaine, nom: i => elements.get(i)?.nom || "", W: zone.clientWidth || 360, H: 230 })
+  const rot = lireRotation(lieu.id);
+  zone.dataset.lieu = lieu.id;
+  zone.innerHTML = vueHTML(lieu.plan, { chaine, W: zone.clientWidth || 360, H: 230, rot })
+    // Boussole (comme une carte) : visible quand le plan est tourné ; la toucher remet le nord en haut
+    + `<button class="boussole" data-action="nord" aria-label="Remettre le nord en haut"${Math.abs(rot) < 1 ? " hidden" : ""}><svg viewBox="0 0 24 24" style="transform:rotate(${rot}deg)"><path class="b-nord" d="M12 3l4 9h-8z"/><path class="b-sud" d="M12 21l-4-9h8z"/></svg></button>`
     + `<div class="plan-outils"><button class="btn-icone petit" data-plan-edit="${lieu.id}" aria-label="Modifier le plan">${icone("pencil")}</button>
        <button class="btn-icone petit" data-action="plan-replier" aria-label="Replier">${icone("chevron-up")}</button></div>`;
 }
@@ -536,7 +551,7 @@ function rafraichir() {
 
 const vignette = e => e.photo
   ? `<img class="vign" src="${e.photo}" alt="">`
-  : `<span class="vign t-${e.type}">${icone(TYPES[e.type].ic)}</span>`;
+  : `<span class="vign t-${e.type}${e.couleur ? " coul-" + e.couleur : ""}">${icone(TYPES[e.type].ic)}</span>`;
 
 // Pastilles (à ranger, introuvable, mobile) et quantité « ×6 »
 const pastillesHTML = e => (e.etat ? `<span class="pastille p-${e.etat}">${ETATS[e.etat]}</span>` : "")
@@ -691,6 +706,7 @@ function afficherResultats(q) {
   $("liste").innerHTML = res.length ? res.slice(0, 300).map(e => ligneHTML(e, true)).join("") : `<p class="vide">Rien trouvé</p>`;
 }
 
+let sensQte = "";   // le chiffre de la quantité « roule » vers le haut ou le bas
 function ouvrirFiche(id) {
   const e = elements.get(id);
   if (!e) { fermerVoile(); return; }
@@ -712,7 +728,7 @@ function ouvrirFiche(id) {
       ? anc.map(a => `<button data-vers="${a.id}">${echapper(a.nom)}</button>`).join(`<span class="sep">›</span>`)
       : `<span>Tout en haut</span>`}</div>` : ""}
     ${e.quantite != null ? `<div class="f-qte${e.quantite === 0 ? " epuise" : ""}"><span class="h4">Quantité</span>
-      <button class="btn-icone petit" data-action="qte-moins" aria-label="Moins">${icone("minus")}</button><b>${e.quantite}</b>
+      <button class="btn-icone petit" data-action="qte-moins" aria-label="Moins">${icone("minus")}</button><b class="${sensQte ? "roule-" + sensQte : ""}">${e.quantite}</b>
       <button class="btn-icone petit" data-action="qte-plus" aria-label="Plus">${icone("plus")}</button>${e.quantite === 0 ? `<span class="f-type">épuisé</span>` : ""}</div>` : ""}
     ${e.note ? `<p class="f-note">${echapper(e.note)}</p>` : ""}
     ${e.tags.length ? `<div class="f-tags">${e.tags.map(t => `<button class="puce" data-tag="${echapper(t)}">${echapper(t)}</button>`).join("")}</div>` : ""}
@@ -726,6 +742,7 @@ function ouvrirFiche(id) {
     ${e.historique.length ? `<details class="f-histo"><summary>${icone("history")}Anciens endroits</summary>
       ${[...e.historique].reverse().map(h => `<div class="h-ligne"><span>${echapper(h.de || "Tout en haut")}</span><span class="date">${dateCourte(h.le)}</span></div>`).join("")}
     </details>` : ""}`, "fiche", id);
+  sensQte = "";
 }
 
 // Bloc « Achat » de la fiche : date, prix, garantie (avec badge), facture
@@ -762,7 +779,7 @@ function ouvrirFormulaire(e, parent, typeImpose) {
   const parentEl = elements.get(neuf ? parent : e.parent);
   form = { id: e?.id, parent: neuf ? (parentEl ? parentEl.id : "") : e.parent,
     type: neuf ? (typeImpose || TYPE_PROPOSE[parentEl ? parentEl.type : ""]) : e.type, photo: e?.photo || "",
-    etat: e?.etat || "", mobile: !!e?.mobile, facture: e?.achat?.facture || "" };
+    etat: e?.etat || "", mobile: !!e?.mobile, facture: e?.achat?.facture || "", couleur: e?.couleur || "" };
   const a = e?.achat || {};
   ouvrirVoile(`<form id="form" autocomplete="off">
     <div class="f-tete"><h2>${neuf ? "Ajouter" : "Modifier"}</h2>
@@ -774,6 +791,7 @@ function ouvrirFormulaire(e, parent, typeImpose) {
     <textarea id="f-note" class="champ" rows="2" placeholder="Note">${echapper(e?.note || "")}</textarea>
     <input id="f-tags" class="champ" placeholder="Tags, séparés par des virgules" value="${echapper((e?.tags || []).join(", "))}">
     <div class="suggestions" id="f-sugg"></div>
+    <div class="f-couleurs">${["", ...COULEURS].map(c => `<button type="button" class="pastel${c ? " coul-" + c : " aucune"}" data-couleur="${c}" aria-pressed="${c === form.couleur}" aria-label="${c || "Sans couleur"}"></button>`).join("")}</div>
     <div class="f-etats">
       <button type="button" class="filtre p-aranger" data-etat="aranger" aria-pressed="${form.etat === "aranger"}">À ranger</button>
       <button type="button" class="filtre p-mobile" data-etat="mobile" aria-pressed="${form.mobile}">Mobile</button>
@@ -826,7 +844,8 @@ function enregistrerFormulaire(autre) {
   const q = $("f-qte").value.trim();
   const achat = normaliserAchat({ date: $("f-date").value, garantie: $("f-garantie").value, prix: $("f-prix").value.replace(",", ".").trim() || null, facture: form.facture });
   ecrire([normaliser(base.id, { ...base, nom, type: form.type, note: $("f-note").value.trim(), tags, photo: form.photo,
-    etat, mobile: form.mobile, quantite: q === "" ? null : q, achat })]);
+    etat, mobile: form.mobile, quantite: q === "" ? null : q, achat, couleur: form.couleur })]);
+  vibrer("succes"); feterCoche();
   if (autre) {   // saisie à la chaîne : même endroit, même type
     afficherToast(`Ajouté : ${nom}`, null);
     ouvrirFormulaire(null, form.parent, form.type);
@@ -898,6 +917,7 @@ function afficherReglages() {
   $("version").textContent = VERSION;
   $("theme-actuel").textContent = NOMS_THEME[reglages.theme] || "Auto";
   document.querySelectorAll("[data-anim-choix]").forEach(b => b.setAttribute("aria-pressed", b.dataset.animChoix === reglages.animations));
+  document.querySelectorAll("[data-vib-choix]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.vibChoix === "oui") === String(reglages.vibrations !== false)));
   $("btn-deconnexion").hidden = MODE_DEMO;
   majSynchro();
 }
@@ -906,6 +926,31 @@ function afficherTheme() {
 }
 
 // ---------- 6. Actions ----------
+
+// Vibrations (réglage par appareil) : petites, différentes selon le moment
+const VIBRATIONS = { tic: 6, ouvre: 10, prise: 14, depot: [12, 40, 18], succes: [8, 50, 14] };
+function vibrer(type) { if (reglages.vibrations !== false) navigator.vibrate?.(VIBRATIONS[type] || 8); }
+
+// Petites récompenses : coche qui se dessine, éclat de confettis
+function feterCoche() {
+  if (animationsReduites()) return;
+  const d = document.createElement("div");
+  d.className = "recompense";
+  d.innerHTML = `<svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="23"/><path d="M15 27l7 7 15-16"/></svg>`;
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), 900);
+}
+function eclat() {
+  if (animationsReduites()) return;
+  const d = document.createElement("div");
+  d.className = "eclat";
+  d.innerHTML = Array.from({ length: 14 }, (_, i) => {
+    const a = i / 14 * Math.PI * 2, r = 70 + (i % 3) * 22;
+    return `<i style="--dx:${Math.cos(a) * r}px;--dy:${Math.sin(a) * r}px;--c:${["#E9A72E", "#DD5F45", "#3F9A5A", "#3F7FD9", "#A9784A", "#DB5E93"][i % 6]}"></i>`;
+  }).join("");
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), 900);
+}
 
 let minuteurToast = null, actionAnnuler = null;
 function afficherToast(texte, annuler) {
@@ -956,10 +1001,9 @@ function ouvrirEndroit(id) {
   const cols = meuble ? colonnesValides(meuble) : [];
   let b0 = null, b1 = null, svg = "";
   if (plan) {
-    const c = cadrage(plan, chaine.map(x => x.id));
-    b0 = cadrage(plan, []).box; b1 = c.box;
-    const k = Math.max(b1.w / 340, b1.h / 190);
-    svg = `<svg class="plan-vue" viewBox="${boxTexte(b0)}" preserveAspectRatio="xMidYMid meet">${contenuSVG(plan, { focus: c.focus, k, nom: i => elements.get(i)?.nom || "" })}</svg>`;
+    const c = cadrage(plan, chaine.map(x => x.id)), rot = lireRotation(lieu.id), ctr = centrePlan(plan);
+    b0 = boiteTournee(cadrage(plan, []).box, rot, ctr); b1 = boiteTournee(c.box, rot, ctr);
+    svg = svgVue(plan, { rot, W: 340, H: 200 }, b0, c.focus);
   }
   ouvrirVoile(`<div class="f-tete"><h2>${echapper(e.nom)}</h2><button class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button></div>
     <div class="f-chemin">${icone("map-pin")}<span>${echapper(cheminTexte(e) || "Tout en haut")}</span></div>
@@ -970,7 +1014,7 @@ function ouvrirEndroit(id) {
     </div>
     <div class="f-actions"><button class="btn plein" data-action="ouvrir">${icone("map-pin")}Y aller</button></div>`, "endroit", id);
   const scene = $("scene"), sv = scene.querySelector("svg"), fa = scene.querySelector(".sc-facade");
-  const montrerFacade = () => { if (fa && fa.hidden) { fa.hidden = false; fa.classList.add("apparait"); navigator.vibrate?.(8); } };
+  const montrerFacade = () => { if (fa && fa.hidden) { fa.hidden = false; fa.classList.add("apparait"); vibrer("tic"); } };
   const fin = () => { cancelAnimationFrame(animEndroit); clearTimeout(animEndroit); if (sv) sv.setAttribute("viewBox", boxTexte(b1)); montrerFacade(); };
   scene.addEventListener("click", fin);
   if (!sv || animationsReduites()) { fin(); return; }
@@ -1002,6 +1046,7 @@ function archiver(id, raison) {
   const copies = ids.map(i => elements.get(i));
   retour();
   ecrire(copies.map(x => ({ ...x, archive: { raison, le, de: cheminTexte(x), avec: x.id === id ? "" : id } })));
+  vibrer("depot");
   afficherToast(`${e.nom} → Archive (${RAISONS[raison]})`, () => ecrire(copies));
 }
 const groupeArchive = id => [...elements.values()].filter(x => x.id === id || x.archive?.avec === id);
@@ -1052,6 +1097,7 @@ function finirVerifier() {
   });
   const manquants = [...document.querySelectorAll("[data-verif]")].filter(c => !c.checked).length;
   if (changes.length) ecrire(changes);
+  if (!manquants) { eclat(); vibrer("succes"); }
   retour();
   afficherToast(manquants ? `${manquants} introuvable${manquants > 1 ? "s" : ""}` : "Tout est là", null);
 }
@@ -1065,6 +1111,7 @@ document.addEventListener("click", ev => {
   let b;
   if ((b = el("[data-aller]"))) { const a = b.dataset.aller; a === "accueil" ? remplacer("") : (MODALES.includes(a) && MODALES.includes(location.hash.slice(1)) ? remplacer(a) : aller(a)); return; }
   if ((b = el("[data-theme-choix]"))) { changerReglage("theme", b.dataset.themeChoix); window.appliquerTheme(b.dataset.themeChoix); afficherTheme(); return; }
+  if ((b = el("[data-vib-choix]"))) { changerReglage("vibrations", b.dataset.vibChoix === "oui"); afficherReglages(); vibrer("succes"); return; }
   if ((b = el("[data-anim-choix]"))) { changerReglage("animations", b.dataset.animChoix); document.documentElement.dataset.anim = b.dataset.animChoix; afficherReglages(); return; }
   if (t === $("ecran-reglages") || t === $("ecran-theme") || t === $("ecran-archive")) { remplacer(""); return; }
   if ((b = el("[data-restaurer]"))) { restaurer(b.dataset.restaurer); return; }
@@ -1094,6 +1141,7 @@ document.addEventListener("click", ev => {
       else if (a === "retrouve") { const e = elements.get(voileId); ecrire([{ ...e, etat: "" }]); afficherToast(`${e.nom} retrouvé`, null); }
       else if (a === "qte-plus" || a === "qte-moins") {
         const e = elements.get(voileId);
+        sensQte = a === "qte-plus" ? "haut" : "bas"; vibrer("tic");
         ecrire([{ ...e, quantite: Math.max(0, e.quantite + (a === "qte-plus" ? 1 : -1)) }]);
       }
       else if (a === "facture") voirImage(elements.get(voileId).achat.facture);
@@ -1119,6 +1167,11 @@ document.addEventListener("click", ev => {
     }
     if ((b = el("[data-modele]"))) { appliquerModele(b.dataset.modele); return; }
     if ((b = el("[data-raison]"))) { archiver(voileId, b.dataset.raison); return; }
+    if ((b = el("[data-couleur]"))) {
+      form.couleur = b.dataset.couleur;
+      $("voile").querySelectorAll("[data-couleur]").forEach(x => x.setAttribute("aria-pressed", x === b));
+      vibrer("tic"); return;
+    }
     if ((b = el("[data-etat]"))) {
       const k = b.dataset.etat;
       if (k === "mobile") { form.mobile = !form.mobile; if (form.mobile && form.etat === "aranger") form.etat = ""; }
@@ -1161,6 +1214,18 @@ document.addEventListener("click", ev => {
     if (k === onglet && k === "maison") { $("recherche").value = ""; remplacer(""); return; }   // 2e toucher sur Maison = retour à l'accueil
     remplacer(k === "maison" ? (dansId ? "dans=" + dansId : "") : k);
     window.scrollTo(0, 0);
+    return;
+  }
+  if (el("[data-action='nord']")) {   // boussole : le plan revient doucement au nord
+    const svg = $("plan").querySelector(".plan-vue"), lieu = $("plan").dataset.lieu, r0 = Number(svg?.dataset.rot) || 0;
+    noterRotation(lieu, 0);
+    if (!svg || animationsReduites()) { afficherAccueil(); return; }
+    const t0 = performance.now(), pas = now => {
+      const t = Math.min(1, (now - t0) / 350);
+      appliquerRotation(svg, r0 * (1 - t) * (1 - t));
+      if (t < 1) requestAnimationFrame(pas); else afficherAccueil();
+    };
+    requestAnimationFrame(pas);
     return;
   }
   if ((b = el("[data-tri]"))) { changerReglage("triObjets", b.dataset.tri); afficherAccueil(); return; }
@@ -1223,6 +1288,7 @@ document.addEventListener("input", ev => {
   }
 });
 document.addEventListener("change", ev => {
+  if (ev.target.dataset.verif) vibrer("tic");
   if (ev.target.id === "esc-de" || ev.target.id === "esc-a") { changerReglage(ev.target.id === "esc-de" ? "escDe" : "escA", ev.target.value); afficherAccueil(); }
 });
 document.addEventListener("change", async ev => {
@@ -1303,7 +1369,7 @@ function attraper(ligne, depart, doigt) {
   glisse = { id: e.id, ligne, etiquette, x: depart.x, y: depart.y, cible: null, survol: null, minuteur: 0, doigt,
     interdits: new Set([e.id, ...descendants(e.id)]), defile: 0 };
   placerEtiquette();
-  navigator.vibrate?.(12);
+  vibrer("prise");
   defilerAuto();
 }
 // L'étiquette flotte au-dessus du doigt (sinon le doigt la cache)
@@ -1340,7 +1406,7 @@ function chercherCible() {
   g.minuteur = setTimeout(() => {
     if (glisse !== g || g.cible !== c) return;
     const dest = cibleId(c);
-    navigator.vibrate?.(8);
+    vibrer("ouvre");
     g.cible = null;
     remplacer(dest ? "dans=" + dest : "");
     setTimeout(() => { if (glisse === g) chercherCible(); }, 80);   // la page a changé sous le doigt
@@ -1354,26 +1420,69 @@ function defilerAuto() {
 function lacherGlisse(ok) {
   const g = glisse; glisse = null;
   clearTimeout(g.minuteur);
-  g.etiquette.remove();
+  // (l'étiquette est retirée par poser(), après son petit vol)
   g.ligne.classList.remove("souleve");
   document.querySelectorAll(".souleve").forEach(x => x.classList.remove("souleve"));
   g.cible?.classList.remove("cible", "survol");
   ignorerClic = true; setTimeout(() => { ignorerClic = false; }, 60);
-  if (ok && g.cible) { deplacer(g.id, cibleId(g.cible)); navigator.vibrate?.(15); }
+  if (ok && g.cible) poser(g, cibleId(g.cible)); else g.etiquette.remove();
+}
+// L'objet « se pose » : l'étiquette file vers la destination en rapetissant, puis la ligne d'arrivée rebondit
+function poser(g, dest) {
+  const vise = g.cible?.getBoundingClientRect?.();
+  deplacer(g.id, dest);
+  vibrer("depot");
+  const arrivee = document.querySelector(`.ligne[data-id="${dest}"]`) || document.querySelector(`.ligne[data-id="${g.id}"]`);
+  if (animationsReduites() || !vise) { g.etiquette.remove(); return; }
+  const r = arrivee?.getBoundingClientRect() || vise;
+  setTimeout(() => g.etiquette.remove(), 600);   // filet de sécurité si l'animation ne se termine pas
+  g.etiquette.animate([{ transform: g.etiquette.style.transform, opacity: 1 },
+    { transform: `translate(${r.left + 20}px, ${r.top + r.height / 2 - 18}px) scale(.45)`, opacity: .2 }],
+    { duration: 260, easing: "cubic-bezier(.5,0,.75,0)" }).finished.then(() => {
+    g.etiquette.remove();
+    arrivee?.animate([{ transform: "scale(1)" }, { transform: "scale(1.035)", background: "var(--accent-doux)" }, { transform: "scale(1)" }], { duration: 320, easing: "ease-out" });
+  });
 }
 // Id visé : dessin du plan = son lien (pas son id de dessin) ; liste = l'endroit ouvert
 const cibleId = c => c.dataset.lien ?? c.dataset.ouvre ?? c.dataset.case ?? c.dataset.id ?? c.dataset.dans ?? c.dataset.depot;
 
-// ---------- Plan de l'accueil : déplacer (1 doigt, souris) et zoomer (2 doigts, molette) ----------
+// ---------- Plan de l'accueil : déplacer (1 doigt, souris), zoomer et tourner (2 doigts, molette) ----------
+// Comme une carte : la rotation est libre et retenue sur ce téléphone (par lieu) ; la boussole remet le nord.
 // Marche aussi avec un 2e doigt pendant qu'on glisse un objet avec le 1er.
-const pv = { ptrs: new Map(), svg: null, vb0: null, d0: 0, m0: null, bouge: false };
+const CLE_ROT = "inv-rotations";
+const lireRotations = () => { try { return JSON.parse(localStorage.getItem(CLE_ROT)) || {}; } catch (e) { return {}; } };
+const lireRotation = id => Number(lireRotations()[id]) || 0;
+function noterRotation(id, rot) {
+  const r = lireRotations();
+  r[id] = Math.round((((rot % 360) + 540) % 360 - 180) * 10) / 10;   // entre -180 et 180
+  try { localStorage.setItem(CLE_ROT, JSON.stringify(r)); } catch (e) { /* rien */ }
+}
+const pv = { ptrs: new Map(), svg: null, vb0: null, d0: 0, a0: 0, m0: null, Pp: null, rot0: 0, bouge: false, tourne: false };
 const lireVB = svg => { const [x, y, w, h] = svg.getAttribute("viewBox").split(" ").map(Number); return { x, y, w, h }; };
 function echellePlan(svg, vb) { const r = svg.getBoundingClientRect(); return { r, s: Math.max(vb.w / r.width, vb.h / r.height) }; }
+// Rotation d'un point autour du centre du plan (repère « écran » <-> repère du plan)
+function tournerPt([x, y], deg, svg) {
+  const cx = +svg.dataset.cx, cy = +svg.dataset.cy, r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+  return [cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c];
+}
+function appliquerRotation(svg, rot) {
+  svg.dataset.rot = rot;
+  svg.querySelector(".pl-rot").setAttribute("transform", `rotate(${rot} ${svg.dataset.cx} ${svg.dataset.cy})`);
+  const b = $("plan").querySelector(".boussole");
+  if (b) { b.hidden = Math.abs(((rot % 360) + 540) % 360 - 180) < 1; b.querySelector("svg").style.transform = `rotate(${rot}deg)`; }
+}
 function departGeste() {
-  const p = [...pv.ptrs.values()];
-  pv.vb0 = lireVB(pv.svg);
+  const p = [...pv.ptrs.values()], svg = pv.svg;
+  pv.vb0 = lireVB(svg);
+  pv.rot0 = Number(svg.dataset.rot) || 0;
   pv.m0 = p.length > 1 ? { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 } : { ...p[0] };
   pv.d0 = p.length > 1 ? Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1 : 0;
+  pv.a0 = p.length > 1 ? Math.atan2(p[1].y - p[0].y, p[1].x - p[0].x) : 0;
+  pv.tourne = false;
+  // Point du plan (non tourné) sous le centre des doigts : il restera sous les doigts
+  const { r, s } = echellePlan(svg, pv.vb0), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const racine = [pv.vb0.x + pv.vb0.w / 2 + (pv.m0.x - cx) * s, pv.vb0.y + pv.vb0.h / 2 + (pv.m0.y - cy) * s];
+  pv.Pp = tournerPt(racine, -pv.rot0, svg);
 }
 $("plan").addEventListener("pointerdown", ev => {
   const svg = ev.target.closest(".plan-vue");
@@ -1390,17 +1499,26 @@ document.addEventListener("pointermove", ev => {
   const m = p.length > 1 ? { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 } : p[0];
   if (!pv.bouge && Math.hypot(m.x - pv.m0.x, m.y - pv.m0.y) < 5 && p.length < 2) return;
   pv.bouge = true;
-  const z = p.length > 1 ? Math.min(8, Math.max(0.15, pv.d0 / (Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1))) : 1;
-  // Le point du plan sous le centre des doigts au départ reste sous le centre des doigts
+  let z = 1, rot = pv.rot0;
+  if (p.length > 1) {
+    z = Math.min(8, Math.max(0.15, pv.d0 / (Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1)));
+    // Rotation : seulement après un vrai mouvement de rotation (sinon un simple pincer tournerait un peu)
+    let da = (Math.atan2(p[1].y - p[0].y, p[1].x - p[0].x) - pv.a0) * 180 / Math.PI;
+    da = ((da + 540) % 360) - 180;
+    if (Math.abs(da) > 10) pv.tourne = true;
+    if (pv.tourne) rot = pv.rot0 + da;
+  }
+  if (rot !== Number(pv.svg.dataset.rot)) appliquerRotation(pv.svg, rot);
   const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-  const px = vb0.x + vb0.w / 2 + (pv.m0.x - cx) * s, py = vb0.y + vb0.h / 2 + (pv.m0.y - cy) * s;
+  const [qx, qy] = tournerPt(pv.Pp, rot, pv.svg);
   const w = vb0.w * z, h = vb0.h * z, s2 = s * z;
-  pv.svg.setAttribute("viewBox", `${px - (m.x - cx) * s2 - w / 2} ${py - (m.y - cy) * s2 - h / 2} ${w} ${h}`);
+  pv.svg.setAttribute("viewBox", `${qx - (m.x - cx) * s2 - w / 2} ${qy - (m.y - cy) * s2 - h / 2} ${w} ${h}`);
 });
 const finGestePlan = ev => {
   if (!pv.ptrs.has(ev.pointerId)) return;
   pv.ptrs.delete(ev.pointerId);
   if (pv.bouge) { ignorerClic = true; setTimeout(() => { ignorerClic = false; }, 60); }
+  if (pv.tourne && $("plan").dataset.lieu) noterRotation($("plan").dataset.lieu, Number(pv.svg.dataset.rot));
   if (pv.ptrs.size) departGeste();
 };
 document.addEventListener("pointerup", finGestePlan);
@@ -1426,6 +1544,7 @@ const COLONNES = [
   { header: "Quantité", key: "quantite", width: 9, centre: true },
   { header: "État", key: "etat", width: 11 },
   { header: "Mobile", key: "mobile", width: 8, centre: true },
+  { header: "Couleur", key: "couleur", width: 10 },
   { header: "Emplacement", key: "chemin", width: 38 },
   { header: "Tags", key: "tags", width: 18 },
   { header: "Note", key: "note", width: 30 },
@@ -1441,7 +1560,7 @@ const COLONNES_ARCHIVE = [
   { header: "Raison", key: "raison", width: 9 },
   { header: "Sorti le", key: "sorti", width: 11 },
   { header: "Ancien endroit", key: "de", width: 38 },
-  ...COLONNES.slice(7, 12),
+  ...COLONNES.slice(8, 13),
   { header: "ID", key: "id", width: 12 },
   { header: "Dans (ID)", key: "parent", width: 12 },
   { header: "Avec (ID)", key: "avec", width: 12 }
@@ -1449,7 +1568,7 @@ const COLONNES_ARCHIVE = [
 const iso = ms => new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 function ligneXL(e) {
   const der = e.historique[e.historique.length - 1];
-  return { nom: e.nom, type: TYPES[e.type].nom, quantite: e.quantite ?? "", etat: ETATS[e.etat] || "", mobile: e.mobile ? "Oui" : "",
+  return { nom: e.nom, type: TYPES[e.type].nom, quantite: e.quantite ?? "", etat: ETATS[e.etat] || "", mobile: e.mobile ? "Oui" : "", couleur: e.couleur,
     chemin: cheminTexte(e), tags: e.tags.join(", "), note: e.note, achete: e.achat?.date || "", garantie: e.achat?.garantie || "",
     prix: e.achat?.prix ?? "", deplace: der ? dateCourte(der.le) : "", id: e.id, parent: e.parent, _image: e.photo || undefined,
     raison: e.archive ? RAISONS[e.archive.raison] : "", sorti: e.archive ? iso(e.archive.le) : "", de: e.archive?.de || "", avec: e.archive?.avec || "" };
@@ -1519,6 +1638,7 @@ $("fichier-import").addEventListener("change", async ev => {
           chemin: archive ? "" : lire(rang, "emplacement"), tags: lire(rang, "tags").split(",").map(t => t.trim()).filter(Boolean),
           note: lire(rang, "note"), photo: images.get(n) || "", quantite: lire(rang, "quantite"), etat: cleDe(ETATS, lire(rang, "etat")),
           mobile: /^(oui|x|1|vrai)$/i.test(lire(rang, "mobile")),
+          couleur: simplifier(lire(rang, "couleur")),
           achat: { date: lire(rang, "achete le"), garantie: lire(rang, "garantie"), prix: lire(rang, "prix").replace(",", ".") || null },
           archive: archive ? { raison: cleDe(RAISONS, lire(rang, "raison")) || "autre", le: Number.isFinite(sorti) ? sorti : Date.now(),
             de: lire(rang, "ancien endroit"), avec: lire(rang, "avec (id)") } : null });

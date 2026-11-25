@@ -279,22 +279,24 @@ export function contenuSVG(plan, o = {}) {
         ? `<rect class="pl-zone" x="${-L2}" y="-20" width="${d.larg}" height="40"/><rect class="pl-trou" x="${-L2}" y="-7" width="${d.larg}" height="14"/>
            <rect class="pl-vitre" x="${-L2}" y="-6" width="${d.larg}" height="12"/><line class="pl-vitre" x1="${-L2}" y1="0" x2="${L2}" y2="0"/>`
         : `<rect class="pl-zone" x="${-L2}" y="${-d.larg}" width="${d.larg}" height="${d.larg + 12}"/><rect class="pl-trou" x="${-L2}" y="-8" width="${d.larg}" height="16"/>
-           <path class="pl-battant" d="M${-L2} 0V${-d.larg}A${d.larg} ${d.larg} 0 0 1 ${L2} 0"/>`)
+           <line class="pl-battant" x1="${-L2}" y1="0" x2="${-L2}" y2="${-d.larg}"/>`)   // battant en un seul trait (plus discret qu'un arc)
       + `</g>`;
   }
   for (const m of plan.meubles) {
     const cls = (o.focus && m.lien === o.focus ? " actif" : "") + (sel && sel.id === m.id ? " sel" : "");
     s += `<g class="pl-meuble${cls}" transform="translate(${m.x} ${m.y}) rotate(${m.rot})" data-k="meuble" data-id="${m.id}"${lien(m)}>${dessin(m.mod, m.w, m.h)}</g>`;
   }
-  // Noms (toujours à l'horizontale)
+  // Noms (toujours à l'horizontale) ; pas sur le plan de l'accueil ni dans « Voir l'endroit »
   const fs = 11 * k;
-  for (const p of plan.pieces) {
-    const t = nom(p.lien) || p.nom;
-    if (t) { const [x, y] = centre(p.pts); s += `<text class="pl-nom" x="${x}" y="${y}" font-size="${fs * 1.1}">${esc(t)}</text>`; }
-  }
-  for (const m of plan.meubles) {
-    const t = nom(m.lien) || m.nom;
-    if (t) s += `<text class="pl-nom petit" x="${m.x}" y="${m.y}" font-size="${fs * .85}">${esc(t)}</text>`;
+  if (!o.sansNoms) {
+    for (const p of plan.pieces) {
+      const t = nom(p.lien) || p.nom;
+      if (t) { const [x, y] = centre(p.pts); s += `<text class="pl-nom" x="${x}" y="${y}" font-size="${fs * 1.1}">${esc(t)}</text>`; }
+    }
+    for (const m of plan.meubles) {
+      const t = nom(m.lien) || m.nom;
+      if (t) s += `<text class="pl-nom petit" x="${m.x}" y="${m.y}" font-size="${fs * .85}">${esc(t)}</text>`;
+    }
   }
   // Poignées (mode Modifier)
   if (sel) {
@@ -335,11 +337,22 @@ export function contenuSVG(plan, o = {}) {
   return s;
 }
 
-// Plan en lecture seule (écran d'accueil). W × H = taille de la zone en pixels.
+// Plan en lecture seule (écran d'accueil, « Voir l'endroit »), tourné de rot degrés autour du
+// centre du plan (comme une carte). Le cadre affiché = la boîte englobante du cadre tourné.
+export function centrePlan(plan) { const b = boite(plan); return [b.x + b.w / 2, b.y + b.h / 2]; }
+export function boiteTournee(b, rot, [cx, cy]) {
+  const r = rot * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+  return bbox([[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]]
+    .map(([x, y]) => [cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c]));
+}
+export function svgVue(plan, o, box, focus) {
+  const c = centrePlan(plan), rot = o.rot || 0, k = Math.max(box.w / (o.W || 340), box.h / (o.H || 200));
+  return `<svg class="plan-vue" viewBox="${box.x} ${box.y} ${box.w} ${box.h}" preserveAspectRatio="xMidYMid meet" data-cx="${c[0]}" data-cy="${c[1]}" data-rot="${rot}">
+    <g class="pl-rot" transform="rotate(${rot} ${c[0]} ${c[1]})">${contenuSVG(plan, { focus, k, nom: o.nom, sansNoms: true })}</g></svg>`;
+}
 export function vueHTML(plan, o) {
   const { focus, box } = cadrage(plan, o.chaine || []);
-  const k = Math.max(box.w / o.W, box.h / o.H);
-  return `<svg class="plan-vue" viewBox="${box.x} ${box.y} ${box.w} ${box.h}" preserveAspectRatio="xMidYMid meet">${contenuSVG(plan, { focus, k, nom: o.nom })}</svg>`;
+  return svgVue(plan, o, boiteTournee(box, o.rot || 0, centrePlan(plan)), focus);
 }
 export function apercuModele(mod) {
   const { w, h } = MODELES[mod];
@@ -350,7 +363,7 @@ export function apercuModele(mod) {
 // ---------- Éditeur (mode « Modifier le plan ») ----------
 // Un doigt sur le vide ou sur une pièce non choisie = déplacer la vue ; deux doigts = zoom.
 // Pièce choisie : la tirer (avec ses pièces collées), tirer un mur pour l'agrandir.
-// Bouton « Angles » : tirer les coins, « + » au milieu d'un mur pour ajouter un coin.
+// Bouton « Libre » : tirer les coins (aimantés, sans grille), « + » au milieu d'un mur pour ajouter un coin.
 let ed = null;
 export const editeurOuvert = () => !!ed;
 
@@ -419,6 +432,52 @@ function sauverMaintenant() {
   ed.o.enregistrer(copie(ed.plan));
 }
 
+// Petite vibration quand quelque chose s'aimante (une fois par nouvel aimant)
+function tic(op, cle) {
+  if (cle && cle !== op.aimante) ed.o.vibrer?.("tic");
+  op.aimante = cle;
+}
+
+// Coin en mode Libre : position libre, sauf si proche (12 px) d'un aimant, du plus fort au plus faible :
+// un autre coin ; un coin exact formé par deux guides (angle droit / 45° depuis chaque voisin) ;
+// un seul guide ; l'alignement horizontal / vertical avec un autre coin.
+function aimanterCoin(plan, p, i, P, k) {
+  const tol = 12 * k, pts = paires(p.pts), n = pts.length;
+  const autres = [];
+  plan.pieces.forEach(q => paires(q.pts).forEach((c, j) => { if (!(q.id === p.id && j === i)) autres.push(c); }));
+  let mieux = null;
+  for (const c of autres) { const d = Math.hypot(c[0] - P.x, c[1] - P.y); if (d < tol && (!mieux || d < mieux.d)) mieux = { d, x: c[0], y: c[1] }; }
+  if (mieux) return { x: mieux.x, y: mieux.y, type: "coin" };
+  // Guides : droites partant des deux coins voisins, à 0 / 45 / 90 / 135°, et à angle droit (ou dans le prolongement) du mur d'avant
+  const A = pts[(i - 1 + n) % n], B = pts[(i + 1) % n], avantA = pts[(i - 2 + n) % n], apresB = pts[(i + 2) % n];
+  const guides = [];
+  for (const [O, Pr] of [[A, avantA], [B, apresB]]) {
+    const angles = [0, 45, 90, 135].map(a => a * Math.PI / 180);
+    if (n > 3) { const a0 = Math.atan2(O[1] - Pr[1], O[0] - Pr[0]); angles.push(a0, a0 + Math.PI / 2); }
+    angles.forEach(a => guides.push({ O, ux: Math.cos(a), uy: Math.sin(a) }));
+  }
+  const proches = guides.map(g => {
+    const t = (P.x - g.O[0]) * g.ux + (P.y - g.O[1]) * g.uy, x = g.O[0] + t * g.ux, y = g.O[1] + t * g.uy;
+    return { g, x, y, d: Math.hypot(P.x - x, P.y - y) };
+  }).filter(c => c.d < tol).sort((a, b) => a.d - b.d);
+  for (const a of proches) for (const b of proches) {
+    if (a.g.O === b.g.O) continue;
+    const det = a.g.ux * b.g.uy - a.g.uy * b.g.ux;
+    if (Math.abs(det) < 0.1) continue;
+    const t = ((b.g.O[0] - a.g.O[0]) * b.g.uy - (b.g.O[1] - a.g.O[1]) * b.g.ux) / det;
+    const x = a.g.O[0] + t * a.g.ux, y = a.g.O[1] + t * a.g.uy;
+    if (Math.hypot(x - P.x, y - P.y) < tol * 1.5) return { x, y, type: "angles" };
+  }
+  if (proches.length) return { x: proches[0].x, y: proches[0].y, type: "angle" };
+  let ax = null, ay = null;
+  for (const [x, y] of autres) {
+    if (Math.abs(x - P.x) < tol && (ax == null || Math.abs(x - P.x) < Math.abs(ax - P.x))) ax = x;
+    if (Math.abs(y - P.y) < tol && (ay == null || Math.abs(y - P.y) < Math.abs(ay - P.y))) ay = y;
+  }
+  if (ax != null || ay != null) return { x: ax ?? P.x, y: ay ?? P.y, type: "aligne" };
+  return { x: P.x, y: P.y, type: "" };
+}
+
 function brancher() {
   const { svg } = ed;
   // La zone change de taille (panneau du bas, clavier, rotation) : on garde l'échelle, sans écraser le plan
@@ -480,6 +539,7 @@ function brancher() {
       else if (op.k === "porte") poserOuverture(plan, obj, obj.x + dx, obj.y + dy);
       else {
         const [mx, my] = aimantPieces(plan, op.ids, aimant(dx), aimant(dy));
+        tic(op, mx !== aimant(dx) || my !== aimant(dy) ? `p${mx},${my}` : "");
         plan.pieces.forEach(q => { if (op.ids.has(q.id)) q.pts = q.pts.map((v, i) => Math.round((v + (i % 2 ? my : mx)) * 10) / 10); });
         plan.meubles.forEach(m => { if (op.meubles.has(m.id)) { m.x += mx; m.y += my; } });
         recaler(plan);
@@ -497,13 +557,16 @@ function brancher() {
         if (Math.abs(ecart - d) < 15 && (!mieux || Math.abs(ecart - d) < Math.abs(mieux - d))) mieux = ecart;
       }
       if (mieux != null) d = Math.round(mieux * 10) / 10;
+      tic(op, mieux != null ? "b" + mieux : "");
       deplacerMur(plan, p, op.i, d);
       recaler(plan);
     } else if (op.type === "coin") {
-      const p = objet();
-      p.pts[2 * op.i] = aimant(P.x); p.pts[2 * op.i + 1] = aimant(P.y);
+      // Mode Libre : pas de grille, mais le coin s'aimante (coin voisin, angle droit, 45°, alignement)
+      const p = objet(), a = aimanterCoin(plan, p, op.i, P, kEd());
+      p.pts[2 * op.i] = Math.round(a.x * 10) / 10; p.pts[2 * op.i + 1] = Math.round(a.y * 10) / 10;
       ed.sel.coin = op.i;
       rattacher(plan, p.id);
+      tic(op, a.type && a.type + a.x.toFixed(0) + a.y.toFixed(0));
     } else if (op.type === "taille") {
       const m = objet(), r = -m.rot * Math.PI / 180, lx = (P.x - m.x) * Math.cos(r) - (P.y - m.y) * Math.sin(r), ly = (P.x - m.x) * Math.sin(r) + (P.y - m.y) * Math.cos(r);
       m.w = Math.max(10, aimant(2 * Math.abs(lx), PAS_MEUBLE)); m.h = Math.max(10, aimant(2 * Math.abs(ly), PAS_MEUBLE));
@@ -578,7 +641,7 @@ function changerDimension(champ, v) {
   if (ed.sel.k === "meuble") { if (champ === "w") obj.w = v; else obj.h = v; }
   else if (ed.sel.k === "porte") { obj.larg = v; recalerUne(ed.plan, obj); }
   else if (champ === "mur") {
-    // Longueur d'un mur (mode Angles) : on allonge depuis son début, la fin bouge
+    // Longueur d'un mur (mode Libre) : on allonge depuis son début, la fin bouge
     const i = ed.sel.mur, n = obj.pts.length / 2, A = info(murs(obj)[i]), j = (i + 1) % n;
     obj.pts[2 * j] = Math.round((A.a[0] + A.ux * v) * 10) / 10; obj.pts[2 * j + 1] = Math.round((A.a[1] + A.uy * v) * 10) / 10;
     rattacher(ed.plan, obj.id);
@@ -693,7 +756,7 @@ function panneau() {
   const outils = [];
   if (s.k === "piece") {
     const colle = membres(ed.plan, obj).length > 1;
-    outils.push(`<button class="btn" data-pe="angles" aria-pressed="${ed.angle}">${ic("polygon")}Angles</button>`);
+    outils.push(`<button class="btn" data-pe="angles" aria-pressed="${ed.angle}">${ic("polygon")}Libre</button>`);
     if (ed.angle && s.coin != null && obj.pts.length > 6) outils.push(`<button class="btn" data-pe="retirer-coin">${ic("x")}Coin</button>`);
     else outils.push(colle ? `<button class="btn" data-pe="dissocier">${ic("unlink")}Dissocier</button>`
       : `<button class="btn" data-pe="coller"${touchantes(ed.plan, obj).size ? "" : " disabled"}>${ic("link")}Coller</button>`);

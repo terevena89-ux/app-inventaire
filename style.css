@@ -129,7 +129,7 @@ mark { background: var(--accent-doux); color: inherit; border-radius: 3px; }
   background: rgba(10,12,16,.38); }
 .feuille { width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; overscroll-behavior: contain;
   background: var(--carte); border-radius: 16px 16px 0 0; padding: 10px 12px calc(14px + env(safe-area-inset-bottom));
-  box-shadow: var(--ombre); animation: monte .18s ease-out; }
+  box-shadow: var(--ombre); animation: monte .32s cubic-bezier(.2,1.25,.4,1); }   /* léger ressort */
 @keyframes monte { from { transform: translateY(30px); opacity: .4; } }
 @media (min-width: 700px) {
   .voile { align-items: center; }
@@ -455,3 +455,46 @@ button.reg:active { background: var(--appui); }
 .survol { animation: survol .6s ease-out; }
 @keyframes survol { from { box-shadow: inset 0 0 0 0 var(--accent); } to { box-shadow: inset 0 0 0 3px var(--accent); } }
 .plan-vue { touch-action: none; }
+
+/* ---------- v0.7 : couleurs, boussole, récompenses ---------- */
+.coul-jaune { --cf: #FAC775; --ct: #412402; }
+.coul-corail { --cf: #F0997B; --ct: #4A1B0C; }
+.coul-rose { --cf: #ED93B1; --ct: #4B1528; }
+.coul-violet { --cf: #AFA9EC; --ct: #26215C; }
+.coul-bleu { --cf: #85B7EB; --ct: #042C53; }
+.coul-turquoise { --cf: #5DCAA5; --ct: #04342C; }
+.coul-vert { --cf: #97C459; --ct: #173404; }
+.coul-gris { --cf: #B4B2A9; --ct: #2C2C2A; }
+[data-theme="sombre"] .coul-jaune { --cf: #D9B577; --ct: #2a1c06; }
+[data-theme="sombre"] .coul-corail { --cf: #D9A08A; --ct: #3a1508; }
+[data-theme="sombre"] .coul-rose { --cf: #D5A0B4; --ct: #3a1222; }
+[data-theme="sombre"] .coul-violet { --cf: #ABA6D6; --ct: #1e1a4a; }
+[data-theme="sombre"] .coul-bleu { --cf: #93B2CF; --ct: #102438; }
+[data-theme="sombre"] .coul-turquoise { --cf: #82C2AC; --ct: #062a22; }
+[data-theme="sombre"] .coul-vert { --cf: #A3BD7C; --ct: #1a2a0c; }
+[data-theme="sombre"] .coul-gris { --cf: #A9A7A0; --ct: #24231f; }
+.vign[class*="coul-"] { background: var(--cf); color: var(--ct); border-color: transparent; }
+.fa-boite[class*="coul-"] { border-left: 4px solid var(--cf); }
+.f-couleurs { display: flex; gap: 6px; margin: 0 0 8px; }
+.pastel { width: 26px; height: 26px; border-radius: 50%; background: var(--cf); border: 2px solid transparent; }
+.pastel.aucune { background: var(--fond); border: 1.5px dashed var(--trait); }
+.pastel[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--carte), 0 0 0 4px var(--accent); }
+.boussole { position: absolute; left: 6px; top: 6px; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%;
+  background: var(--carte); border: 1px solid var(--trait); }
+.boussole svg { width: 22px; height: 22px; transition: transform .1s; }
+.b-nord { fill: #D9534F; } .b-sud { fill: var(--discret); }
+.roule-haut { display: inline-block; animation: roule-haut .25s ease-out; }
+.roule-bas { display: inline-block; animation: roule-bas .25s ease-out; }
+@keyframes roule-haut { from { transform: translateY(10px); opacity: 0; } }
+@keyframes roule-bas { from { transform: translateY(-10px); opacity: 0; } }
+.recompense { position: fixed; left: 50%; top: 42%; z-index: 80; width: 76px; height: 76px; margin: -38px 0 0 -38px; pointer-events: none;
+  animation: recompense .9s ease-out forwards; }
+.recompense svg { width: 100%; height: 100%; fill: none; stroke: var(--accent-fond); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
+.recompense circle { fill: var(--carte); stroke-dasharray: 145; stroke-dashoffset: 145; animation: trace .35s ease-out forwards; }
+.recompense path { stroke-dasharray: 40; stroke-dashoffset: 40; animation: trace .3s .25s ease-out forwards; }
+@keyframes trace { to { stroke-dashoffset: 0; } }
+@keyframes recompense { 0% { transform: scale(.6); opacity: 0; } 20% { transform: scale(1.05); opacity: 1; } 75% { opacity: 1; } 100% { transform: scale(.95); opacity: 0; } }
+.eclat { position: fixed; left: 50%; top: 45%; z-index: 80; pointer-events: none; }
+.eclat i { position: absolute; width: 8px; height: 8px; margin: -4px; border-radius: 2px; background: var(--c); animation: eclat .8s cubic-bezier(.2,.7,.3,1) forwards; }
+@keyframes eclat { to { transform: translate(var(--dx), var(--dy)) rotate(200deg); opacity: 0; } }
+.pl-battant { stroke-width: 1.2; }
