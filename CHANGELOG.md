@@ -1,5 +1,13 @@
 # Inventaire — journal des nouveautés
 
+## 0.4.0 — 2026-11-25
+Plan plus pratique à dessiner.
+- Pièces : on les agrandit en tirant un mur (petite barre au milieu). Les coins ne se tirent qu'avec le bouton « Angles » (qui garde le « + » pour ajouter un coin) ; un mur en biais se tire aussi en entier.
+- Pièces aimantées : un mur approché d'un autre s'y pose. Deux pièces qui se touchent se collent : elles bougent ensemble (avec leurs meubles, portes et fenêtres) et un mur commun bouge pour les deux. Boutons « Dissocier » / « Coller ».
+- Dimensions précises en cm : largeur × longueur d'une pièce rectangle ou d'un meuble, longueur d'un mur en mode Angles, largeur d'une porte ou fenêtre. Surface en m² de la pièce choisie.
+- Portes : faciles à attraper (toute la zone d'ouverture), elles suivent leur mur quand la pièce bouge.
+- Nouveau : fenêtres (double trait dans le mur), posées comme les portes.
+
 ## 0.3.0 — 2026-11-25
 La vue de face des meubles.
 - Dans un meuble (ou une de ses cases), sa façade remplace le plan : étagères, tiroirs, penderie, portes, dessus / dessous, avec les boîtes et objets dessinés dedans (photo + nom). Toucher une case ou une boîte l'ouvre ; la case ouverte est colorée.

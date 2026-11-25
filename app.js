@@ -20,7 +20,7 @@ import { normaliserPlan, planVide, vueHTML, ouvrirEditeur, fermerEditeur, editeu
 
 // ---------- 1. Base et données ----------
 
-const VERSION = "v0.3.0";
+const VERSION = "v0.4.0";
 const NOM_APPLI = "app-inventaire";
 
 // Tout est un « élément » (lieu, pièce, meuble, boîte, objet) rangé dans un autre (parent).

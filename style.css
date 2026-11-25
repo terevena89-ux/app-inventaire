@@ -334,3 +334,20 @@ button.reg:active { background: var(--appui); }
 .c-genres button { height: 30px; padding: 0 10px; border: 1px solid var(--trait); border-radius: 15px; font-size: 13px; }
 .c-genres button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-doux); color: var(--accent); font-weight: 700; }
 .reg-mini { display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px; color: var(--discret); font-size: 13px; }
+
+/* Plan v0.4 : fenêtres, murs à tirer, dimensions */
+.pl-zone { fill: transparent; }
+.pl-vitre { fill: var(--sol); stroke: var(--meuble); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.pl-fenetre.sel .pl-vitre { stroke: var(--accent); stroke-width: 2; }
+.pe-bord { stroke: transparent; fill: none; }
+.pe-bord.choisi { stroke: var(--accent); opacity: .3; }
+.pe-barre { stroke: var(--accent); stroke-linecap: round; pointer-events: none; }
+.pe-dims { display: flex; align-items: center; gap: 6px; color: var(--discret); font-size: 13px; white-space: nowrap; }
+.pe-ligne .pe-dims { flex: none; }
+.pe-dim { width: 66px; height: 36px; padding: 0 6px; border: 1px solid var(--trait); border-radius: 8px; background: var(--fond); color: var(--texte);
+  outline: 0; font-size: 15px; text-align: center; -moz-appearance: textfield; }
+.pe-dim::-webkit-inner-spin-button, .pe-dim::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.pe-dim:focus { border-color: var(--accent); }
+.pe-m2 { margin-left: auto; color: var(--texte); font-weight: 700; }
+.pe-ligne .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-doux); color: var(--accent); }
+.pe-ligne .btn:disabled { opacity: .4; }
