@@ -33,4 +33,11 @@
 <symbol id="history" viewBox="0 0 24 24"><path d="M12 8v4l2 2"/><path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/></symbol>
 <symbol id="chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6l6-6"/></symbol>
 <symbol id="map-pin" viewBox="0 0 24 24"><path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/><path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z"/></symbol>
+
+<symbol id="undo" viewBox="0 0 24 24"><path d="M9 14l-4-4l4-4"/><path d="M5 10h11a4 4 0 1 1 0 8h-1"/></symbol>
+<symbol id="maximize" viewBox="0 0 24 24"><path d="M4 8v-2a2 2 0 0 1 2-2h2"/><path d="M4 16v2a2 2 0 0 0 2 2h2"/><path d="M16 4h2a2 2 0 0 1 2 2v2"/><path d="M16 20h2a2 2 0 0 0 2-2v-2"/></symbol>
+<symbol id="copy" viewBox="0 0 24 24"><path d="M8 10a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2z"/><path d="M16 8v-2a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+<symbol id="rotate" viewBox="0 0 24 24"><path d="M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5"/></symbol>
+<symbol id="polygon" viewBox="0 0 24 24"><path d="M4 4h16v10l-6 6h-10z"/></symbol>
+<symbol id="chevron-up" viewBox="0 0 24 24"><path d="M6 15l6-6l6 6"/></symbol>
 </defs></svg>

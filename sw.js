@@ -1,9 +1,9 @@
 // Service worker : garde une copie de l'appli pour l'ouvrir sans réseau, et la met à jour.
 // À CHAQUE NOUVELLE VERSION : changer le numéro ci-dessous.
-const CACHE = "inventaire-v0.1.0";
+const CACHE = "inventaire-v0.2.0";
 
 const FICHIERS = [
-  "./", "index.html", "style.css", "app.js", "champs-mobile.js", "notes-idees.js", "excel-style.js", "firebase-config.js",
+  "./", "index.html", "style.css", "app.js", "plan.js", "champs-mobile.js", "notes-idees.js", "excel-style.js", "firebase-config.js",
   "manifest.json", "icones/icone.svg", "icones/icone-192.png", "icones/icones.svg"
 ];
 

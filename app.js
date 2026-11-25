@@ -16,10 +16,11 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { ajouterFeuille, telechargerClasseur, lireClasseur, chargerExcelJS } from "./excel-style.js";
+import { normaliserPlan, planVide, vueHTML, ouvrirEditeur, fermerEditeur, editeurOuvert } from "./plan.js";
 
 // ---------- 1. Base et données ----------
 
-const VERSION = "v0.1.0";
+const VERSION = "v0.2.0";
 const NOM_APPLI = "app-inventaire";
 
 // Tout est un « élément » (lieu, pièce, meuble, boîte, objet) rangé dans un autre (parent).
@@ -68,7 +69,8 @@ function normaliser(id, d) {
     photo: typeof d.photo === "string" && d.photo.startsWith("data:image/") ? d.photo : "",
     historique: Array.isArray(d.historique)
       ? d.historique.filter(h => h && typeof h.de === "string").map(h => ({ de: h.de, le: Number(h.le) || 0 })).slice(-MAX_HISTO) : [],
-    cree: Number(d.cree) || 0
+    cree: Number(d.cree) || 0,
+    plan: normaliserPlan(d.plan)   // seulement pour un lieu (plan.js)
   };
 }
 
@@ -250,12 +252,53 @@ function router() {
   montrer("accueil");
   if (cle === "dans") dansId = elements.has(val) ? val : "";
   else if (!cle) dansId = "";
+  if (cle === "plan") { fermerVoile(); ouvrirPlan(val); }
+  else fermerEditeur();
   afficherAccueil();
   if (cle === "fiche") { if (voileType !== "fiche" || voileId !== val) ouvrirFiche(val); }
   else if (cle === "modifier") { if (voileType !== "form") ouvrirFormulaire(elements.get(val), null); }
   else if (cle === "ajouter") { if (voileType !== "form") ouvrirFormulaire(null, elements.has(val) ? val : ""); }
   else if (cle === "deplacer") { if (voileType !== "deplacer") ouvrirDeplacer(val); }
-  else fermerVoile();
+  else if (cle !== "plan") fermerVoile();
+}
+
+// Mode « Modifier le plan » (plein écran, plan.js). Chaque changement est enregistré dans le lieu.
+function ouvrirPlan(id) {
+  const lieu = elements.get(id);
+  if (!lieu) { remplacer(""); return; }
+  if (editeurOuvert()) return;
+  ouvrirEditeur(lieu.plan, {
+    titre: lieu.nom,
+    nom: i => elements.get(i)?.nom || "",
+    candidats: () => descendants(id).map(i => elements.get(i)).filter(estContenant).map(e => ({
+      id: e.id, nom: e.nom, ic: TYPES[e.type].ic, chemin: cheminTexte(e),
+      texte: simplifier(e.nom + " " + cheminTexte(e))
+    })).sort((a, b) => a.chemin.localeCompare(b.chemin, "fr") || a.nom.localeCompare(b.nom, "fr")),
+    enregistrer: plan => { const l = elements.get(id); if (l) ecrire([{ ...l, plan }]); },
+    fermer: () => retour()
+  });
+}
+
+// Plan au-dessus de la liste : celui du lieu (élément tout en haut), recentré sur la pièce reliée
+function afficherPlan(cur) {
+  const zone = $("plan");
+  const lieu = cur ? (ancetres(cur)[0] || cur) : null;
+  if (!lieu || (planVide(lieu.plan) && cur.id !== lieu.id)) { zone.hidden = true; return; }
+  zone.hidden = false;
+  if (planVide(lieu.plan)) {
+    zone.className = "plan-zone vide";
+    zone.innerHTML = `<button class="plan-nouveau" data-plan-edit="${lieu.id}">${icone("pencil")}Dessiner le plan</button>`;
+    return;
+  }
+  zone.className = "plan-zone";
+  if (reglages.planReplie) {
+    zone.innerHTML = `<button class="plan-replie" data-action="plan-replier"><span class="h4">Plan</span>${icone("chevron-down")}</button>`;
+    return;
+  }
+  const chaine = [cur, ...ancetres(cur).reverse()].map(x => x.id);
+  zone.innerHTML = vueHTML(lieu.plan, { chaine, nom: i => elements.get(i)?.nom || "", W: zone.clientWidth || 360, H: 230 })
+    + `<div class="plan-outils"><button class="btn-icone petit" data-plan-edit="${lieu.id}" aria-label="Modifier le plan">${icone("pencil")}</button>
+       <button class="btn-icone petit" data-action="plan-replier" aria-label="Replier">${icone("chevron-up")}</button></div>`;
 }
 window.addEventListener("hashchange", router);
 
@@ -285,8 +328,9 @@ let aSurligner = "";
 function afficherAccueil() {
   const q = $("recherche").value.trim();
   $("effacer-recherche").hidden = !q;
-  if (q) { afficherResultats(q); return; }
+  if (q) { $("plan").hidden = true; afficherResultats(q); return; }
   const cur = elements.get(dansId);
+  afficherPlan(cur);
   const fil = cur ? [...ancetres(cur), cur] : [];
   $("fil").hidden = false;
   $("fil").innerHTML = `<button class="fil-bout" data-dans="">${icone("home")}Tout</button>`
@@ -565,6 +609,13 @@ document.addEventListener("click", ev => {
   // Accueil
   if ((b = el("[data-dans]"))) { $("recherche").value = ""; b.dataset.dans ? aller("dans=" + b.dataset.dans) : remplacer(""); return; }
   if ((b = el("[data-fiche]"))) { aller("fiche=" + b.dataset.fiche); return; }
+  if ((b = el("[data-plan-edit]"))) { aller("plan=" + b.dataset.planEdit); return; }
+  if (el("[data-action='plan-replier']")) { changerReglage("planReplie", !reglages.planReplie); afficherAccueil(); return; }
+  if ((b = el(".plan-vue [data-lien]"))) {
+    const e = elements.get(b.dataset.lien);
+    if (e) estContenant(e) ? aller("dans=" + e.id) : aller("fiche=" + e.id);
+    return;
+  }
   if ((b = el("[data-action='ajouter-ici']")) || t.closest("#btn-ajouter")) { aller("ajouter=" + ($("recherche").value.trim() ? "" : dansId)); return; }
   if ((b = el(".ligne"))) {
     const e = elements.get(b.dataset.id);
@@ -656,8 +707,9 @@ function suivreGlisse(e) {
 function chercherCible() {
   const g = glisse;
   const sous = document.elementFromPoint(g.x, g.y);
-  let c = sous && (sous.closest(".ligne") || sous.closest(".fil-bout"));
-  const id = c ? (c.dataset.id ?? c.dataset.dans) : null;
+  let c = sous && (sous.closest(".ligne") || sous.closest(".fil-bout") || sous.closest(".plan-vue [data-lien]"));
+  if (c?.dataset.lien && !elements.has(c.dataset.lien)) c = null;
+  const id = c ? cibleId(c) : null;
   const parent = elements.get(g.id)?.parent || "";
   if (c && (g.interdits.has(id) || id === parent)) c = null;
   if (c !== g.cible) {
@@ -677,8 +729,9 @@ function lacherGlisse(ok) {
   g.ligne.classList.remove("souleve");
   g.cible?.classList.remove("cible");
   ignorerClic = true; setTimeout(() => { ignorerClic = false; }, 60);
-  if (ok && g.cible) deplacer(g.id, g.cible.dataset.id ?? g.cible.dataset.dans);
+  if (ok && g.cible) deplacer(g.id, cibleId(g.cible));
 }
+const cibleId = c => c.dataset.lien ?? c.dataset.id ?? c.dataset.dans;   // dessin du plan : son lien, pas son id de dessin
 
 // ---------- 8. Excel ----------
 // Une feuille « Inventaire » dans l'ordre de l'arbre (nom décalé selon la profondeur),
@@ -713,6 +766,11 @@ $("btn-export").addEventListener("click", async () => {
       c.alignment = { ...c.alignment, indent: Math.min(p.prof, 15) };
       if (p.gras) c.font = { bold: true };
     });
+    // Plans : un onglet à part, le plan en texte (JSON) pour pouvoir le réimporter tel quel
+    const plans = [...elements.values()].filter(e => !planVide(e.plan));
+    if (plans.length) ajouterFeuille(wb, "Plans", [
+      { header: "Lieu", key: "nom", width: 24 }, { header: "ID", key: "id", width: 12 }, { header: "Plan", key: "plan", width: 60 }
+    ], plans.map(e => ({ nom: e.nom, id: e.id, plan: JSON.stringify(e.plan) })), { hauteur: 21 });
     await telechargerClasseur(wb, NOM_APPLI);
   } catch (err) { afficherToast("Export impossible : " + err.message, null); }
 });
@@ -726,6 +784,11 @@ $("fichier-import").addEventListener("change", async ev => {
     const wb = await lireClasseur(f);
     const ws = wb.getWorksheet("Inventaire") || wb.worksheets[0];
     const images = imagesParLigne(wb, ws);
+    const plans = new Map();
+    wb.getWorksheet("Plans")?.eachRow((rang, n) => {
+      if (n === 1) return;
+      try { plans.set(String(rang.getCell(2).text).trim(), JSON.parse(String(rang.getCell(3).text))); } catch (e) { /* plan illisible : ignoré */ }
+    });
     const cols = {};
     ws.getRow(1).eachCell((c, i) => { cols[simplifier(c.text)] = i; });
     const lire = (rang, nom) => cols[nom] ? String(rang.getCell(cols[nom]).text ?? "").trim() : "";
@@ -751,7 +814,7 @@ $("fichier-import").addEventListener("change", async ev => {
     const anciens = [...elements.keys()].filter(id => !ids.has(id));
     const avant = new Map(elements);
     effacer(anciens);
-    ecrire(lus.map(l => normaliser(l.id, { ...l, parent: l.parentId, historique: avant.get(l.id)?.historique || [], cree: avant.get(l.id)?.cree || Date.now() })));
+    ecrire(lus.map(l => normaliser(l.id, { ...l, parent: l.parentId, plan: plans.get(l.id), historique: avant.get(l.id)?.historique || [], cree: avant.get(l.id)?.cree || Date.now() })));
     afficherToast(`${lus.length} éléments importés`, null);
     remplacer("");
   } catch (err) { afficherToast("Import impossible : " + err.message, null); }

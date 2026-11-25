@@ -14,6 +14,7 @@
   --accent-doux: #F1E6D8;   /* cible du glisser, puces */
   --danger: #B3261E;
   --ombre: 0 6px 24px rgba(30,25,15,.18);
+  --mur: #8C8984; --sol: #FFFFFF; --meuble: #4A4D55;
   --police: system-ui, "Segoe UI", Roboto, sans-serif;
   color-scheme: light;
 }
@@ -29,6 +30,7 @@
   --accent-doux: #33302c;
   --danger: #f2b8b5;
   --ombre: 0 8px 28px rgba(5,8,12,.6);
+  --mur: #5E6878; --sol: #232a37; --meuble: #b9c2d0;
   color-scheme: dark;
 }
 
@@ -235,3 +237,58 @@ button.reg:active { background: var(--appui); }
 
 /* Couleurs des modules communs (champs-mobile.js, notes-idees.js) */
 .pm-voile, .ni-ecran { --pm-fond: var(--carte); --pm-texte: var(--texte); --pm-discret: var(--discret); --pm-trait: var(--trait); --pm-accent: var(--accent); --pm-champ: var(--fond); --pm-appui: var(--appui); --pm-police: var(--police); }
+
+/* ---------- Plan (plan.js) ---------- */
+.plan-zone { position: relative; margin: 0 10px 6px; border: 1px solid var(--trait); border-radius: 10px; background: var(--fond); overflow: hidden; }
+.plan-zone.vide { border: 0; background: none; }
+.plan-vue { display: block; width: 100%; height: 230px; }
+.plan-outils { position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; }
+.plan-outils .btn-icone { background: var(--carte); border: 1px solid var(--trait); }
+.plan-replie { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 34px; padding: 0 10px 0 12px; color: var(--discret); }
+.plan-replie .ic { width: 16px; height: 16px; }
+.plan-nouveau { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 40px; border: 1.5px dashed var(--trait);
+  border-radius: 10px; color: var(--discret); font-weight: 600; }
+.plan-nouveau .ic { width: 17px; height: 17px; }
+
+.pl-piece { fill: var(--sol); stroke: var(--mur); stroke-width: 12; stroke-linejoin: miter; }
+.pl-piece.actif { fill: var(--accent-doux); }
+.pl-piece.sel { stroke: var(--accent); }
+.pl-trou { fill: var(--sol); }
+.pl-battant { fill: none; stroke: var(--meuble); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.pl-porte.sel .pl-battant { stroke: var(--accent); stroke-width: 2; }
+.pl-meuble * { fill: var(--sol); stroke: var(--meuble); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
+.pl-meuble.actif * { stroke: var(--accent); stroke-width: 2; fill: var(--accent-doux); }
+.pl-nom { fill: var(--texte); opacity: .75; font-weight: 700; text-anchor: middle; dominant-baseline: central; pointer-events: none; font-family: var(--police); }
+.pl-nom.petit { font-weight: 600; opacity: .65; }
+.plan-vue [data-lien] { cursor: pointer; }
+.plan-vue .cible, .plan-vue .cible * { stroke: var(--accent) !important; fill: var(--accent-doux) !important; }
+
+/* Éditeur plein écran */
+.pe { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: var(--fond); }
+.pe-tete { display: flex; align-items: center; gap: 2px; height: 48px; padding: 0 6px; border-bottom: 1px solid var(--trait); background: var(--carte); }
+.pe-tete h2 { flex: 1; margin: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pe-svg { flex: 1; min-height: 0; width: 100%; display: block; touch-action: none; }
+.pe-bas { flex: none; max-height: 55vh; display: flex; flex-direction: column; gap: 6px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--trait); background: var(--carte); }
+.pe-ligne { display: flex; gap: 6px; }
+.pe-ligne .btn { flex: 1; min-width: 0; padding: 0 8px; }
+.pe-nom { flex: 1; min-width: 0; height: 40px; padding: 0 10px; border: 1px solid var(--trait); border-radius: 10px; background: var(--fond); outline: 0; font-size: 15px; }
+.pe-nom:focus { border-color: var(--accent); }
+.pe-relier { flex: 0 1 auto !important; max-width: 50%; }
+.pe-relier span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pe-feuille-tete { display: flex; align-items: center; justify-content: space-between; padding-left: 4px; }
+.pe-feuille { overflow-y: auto; min-height: 0; }
+.pe-feuille .recherche { margin: 0 0 4px; }
+.pe-cat-titre { margin: 6px 2px 4px; }
+.pe-cat { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.pe-cat button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 2px; border: 1px solid var(--trait); border-radius: 9px; font-size: 11px; line-height: 1.15; }
+.pe-cat button:active { background: var(--appui); }
+.pe-cat svg { width: 100%; height: 40px; }
+.pe-point { fill: var(--discret); opacity: .4; }
+.pe-poignee { fill: var(--carte); stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.pe-poignee.choisi { fill: var(--accent); }
+.pe-poignee.rot { fill: var(--accent-doux); }
+.pe-plus { fill: var(--accent); opacity: .55; }
+.pe-cadre { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+/* Sur le plan d'accueil, un dessin non relié laisse passer le doigt vers la pièce dessous */
+.plan-vue .pl-meuble:not([data-lien]), .plan-vue .pl-porte, .plan-vue .pl-piece:not([data-lien]) { pointer-events: none; }
