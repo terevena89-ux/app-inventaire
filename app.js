@@ -20,7 +20,7 @@ import { normaliserPlan, planVide, vueHTML, ouvrirEditeur, fermerEditeur, editeu
 
 // ---------- 1. Base et données ----------
 
-const VERSION = "v0.2.0";
+const VERSION = "v0.3.0";
 const NOM_APPLI = "app-inventaire";
 
 // Tout est un « élément » (lieu, pièce, meuble, boîte, objet) rangé dans un autre (parent).
@@ -31,11 +31,12 @@ const TYPES = {
   lieu:   { nom: "Lieu",   ic: "home" },
   piece:  { nom: "Pièce",  ic: "door" },
   meuble: { nom: "Meuble", ic: "meuble" },
+  case:   { nom: "Case",   ic: "case" },    // compartiment d'un meuble (étagère, tiroir…) : vue de face
   boite:  { nom: "Boîte",  ic: "box" },
   objet:  { nom: "Objet",  ic: "objet" }
 };
 const ORDRE_TYPES = Object.keys(TYPES);
-const TYPE_PROPOSE = { "": "lieu", lieu: "piece", piece: "meuble", meuble: "boite", boite: "objet", objet: "objet" };
+const TYPE_PROPOSE = { "": "lieu", lieu: "piece", piece: "meuble", meuble: "boite", case: "objet", boite: "objet", objet: "objet" };
 const MAX_HISTO = 20;
 
 let elements = new Map();     // id -> élément
@@ -70,8 +71,20 @@ function normaliser(id, d) {
     historique: Array.isArray(d.historique)
       ? d.historique.filter(h => h && typeof h.de === "string").map(h => ({ de: h.de, le: Number(h.le) || 0 })).slice(-MAX_HISTO) : [],
     cree: Number(d.cree) || 0,
-    plan: normaliserPlan(d.plan)   // seulement pour un lieu (plan.js)
+    plan: normaliserPlan(d.plan),        // seulement pour un lieu (plan.js)
+    facade: normaliserFacade(d.facade)   // seulement pour un meuble (vue de face)
   };
+}
+// Façade = colonnes de cases empilées : { cols: [{ w, cases: [{ id, h, genre }] }] }
+// id = l'élément « Case » (enfant du meuble) ; w / h = largeur / hauteur relatives (1 à 3).
+const GENRES = { etagere: "Étagère", tiroir: "Tiroir", penderie: "Penderie", porte: "Porte", dessus: "Dessus", dessous: "Dessous" };
+function normaliserFacade(f) {
+  if (!f || !Array.isArray(f.cols)) return null;
+  const t = v => Math.min(3, Math.max(1, Math.round(Number(v) || 1)));
+  const cols = f.cols.filter(c => c && Array.isArray(c.cases)).map(c => ({
+    w: t(c.w), cases: c.cases.filter(k => k && k.id).map(k => ({ id: String(k.id), h: t(k.h), genre: GENRES[k.genre] ? k.genre : "etagere" }))
+  })).filter(c => c.cases.length);
+  return cols.length ? { cols } : null;
 }
 
 // ---------- 2. Stockage ----------
@@ -197,7 +210,15 @@ function indexer() {
     parParent.get(p).push(e);
   }
   // Contenants d'abord (par type), puis objets ; alphabétique dans chaque groupe
-  for (const l of parParent.values()) l.sort((a, b) => (estContenant(b) - estContenant(a)) || (ORDRE_TYPES.indexOf(a.type) - ORDRE_TYPES.indexOf(b.type)) || triNom(a, b));
+  for (const [pid, l] of parParent) {
+    l.sort((a, b) => (estContenant(b) - estContenant(a)) || (ORDRE_TYPES.indexOf(a.type) - ORDRE_TYPES.indexOf(b.type)) || triNom(a, b));
+    // Cases d'un meuble : dans l'ordre de la façade (colonne par colonne, de haut en bas)
+    const f = elements.get(pid)?.facade;
+    if (f) {
+      const rang = new Map(f.cols.flatMap(c => c.cases.map(k => k.id)).map((id, i) => [id, i]));
+      l.sort((a, b) => (rang.get(a.id) ?? 1e9) - (rang.get(b.id) ?? 1e9));
+    }
+  }
 }
 const enfants = id => parParent.get(id) || [];
 const estContenant = e => e.type !== "objet" || enfants(e.id).length > 0;
@@ -259,6 +280,8 @@ function router() {
   else if (cle === "modifier") { if (voileType !== "form") ouvrirFormulaire(elements.get(val), null); }
   else if (cle === "ajouter") { if (voileType !== "form") ouvrirFormulaire(null, elements.has(val) ? val : ""); }
   else if (cle === "deplacer") { if (voileType !== "deplacer") ouvrirDeplacer(val); }
+  else if (cle === "modeles") { if (voileType !== "modeles") ouvrirModeles(); }
+  else if (cle === "case") { const [ci, ki] = val.split("-").map(Number); if (voileType !== "case") ouvrirCase(ci, ki); }
   else if (cle !== "plan") fermerVoile();
 }
 
@@ -277,6 +300,130 @@ function ouvrirPlan(id) {
     enregistrer: plan => { const l = elements.get(id); if (l) ecrire([{ ...l, plan }]); },
     fermer: () => retour()
   });
+}
+
+// ---------- Vue de face d'un meuble ----------
+// Modèles : colonnes [largeur, [genre, hauteur], …]. Les noms sont numérotés par genre.
+const MODELES_FACADE = {
+  etageres: { nom: "Étagères", cols: [[1, ["etagere", 1], ["etagere", 1], ["etagere", 1], ["etagere", 1]]] },
+  tiroirs:  { nom: "Tiroirs", cols: [[1, ["tiroir", 1], ["tiroir", 1], ["tiroir", 1]]] },
+  commode:  { nom: "Commode 2 colonnes", cols: [[1, ["tiroir", 1], ["tiroir", 1], ["tiroir", 1]], [1, ["tiroir", 1], ["tiroir", 1], ["tiroir", 1]]] },
+  penderie: { nom: "Penderie + étagères", cols: [[2, ["penderie", 3]], [1, ["etagere", 1], ["etagere", 1], ["etagere", 1]]] },
+  placard:  { nom: "Placard 2 portes", cols: [[1, ["etagere", 1], ["etagere", 1], ["etagere", 1]], [1, ["etagere", 1], ["etagere", 1], ["etagere", 1]]] },
+  lit:      { nom: "Lit", cols: [[1, ["dessus", 2], ["dessous", 1]]] },
+  bureau:   { nom: "Bureau", cols: [[2, ["dessus", 1], ["dessous", 2]], [1, ["tiroir", 1], ["tiroir", 1], ["tiroir", 1]]] }
+};
+const UNIQUES = ["penderie", "dessus", "dessous"];   // pas de numéro pour la 1re
+function nomCase(genre, deja) {
+  const n = deja.filter(g => g === genre).length + 1;
+  return UNIQUES.includes(genre) && n === 1 ? GENRES[genre] : `${GENRES[genre]} ${n}`;
+}
+
+let facadeEdition = "";   // id du meuble dont on modifie la façade (rien = consultation)
+function trouverFacade(cur) {
+  if (!cur) return null;
+  const chaine = [cur, ...ancetres(cur).reverse()];
+  const i = chaine.findIndex(x => x.facade || (x === cur && x.type === "meuble"));
+  if (i < 0) return null;
+  return { meuble: chaine[i], focus: i > 0 ? chaine[i - 1].id : "" };
+}
+// Cases encore valables (élément existant et toujours rangé dans ce meuble)
+function colonnesValides(m) {
+  return (m.facade?.cols || []).map(c => ({ ...c, cases: c.cases.filter(k => elements.get(k.id)?.parent === m.id) })).filter(c => c.cases.length);
+}
+function facadeHTML(cols, o = {}) {
+  const lignes = Math.max(...cols.map(c => c.cases.reduce((s, k) => s + k.h, 0)));
+  const H = o.mini ? 64 : Math.min(300, Math.max(130, lignes * 44));
+  return `<div class="fa-cadre${o.edition ? " edition" : ""}${o.mini ? " mini" : ""}" style="height:${H}px">` + cols.map((c, ci) => `<div class="fa-col" style="flex:${c.w}">`
+    + c.cases.map((k, ki) => {
+      const e = elements.get(k.id), kids = o.mini ? [] : enfants(k.id);
+      return `<div class="fa-case g-${k.genre}${k.id && k.id === o.focus ? " actif" : ""}" style="flex:${k.h}"${o.mini ? "" : ` data-case="${k.id}" data-ci="${ci}" data-ki="${ki}"`}>
+        <span class="fa-nom">${echapper(o.mini ? "" : e?.nom)}</span>
+        ${kids.length ? `<div class="fa-contenu">${kids.map(x => `<span class="fa-boite${estContenant(x) ? " contenant" : ""}" data-ouvre="${x.id}">${x.photo ? `<img src="${x.photo}" alt="">` : ""}${echapper(x.nom)}</span>`).join("")}</div>` : ""}
+      </div>`;
+    }).join("")
+    + (o.edition ? `<button class="fa-plus" data-fa="ajout-case" data-ci="${ci}" aria-label="Ajouter une case">${icone("plus")}</button>` : "")
+    + `</div>`).join("") + `</div>`;
+}
+function afficherFacade({ meuble, focus }) {
+  const zone = $("facade"), cols = colonnesValides(meuble);
+  if (!cols.length) {
+    zone.innerHTML = `<button class="plan-nouveau" data-fa="modele">${icone("case")}Vue de face</button>`;
+    return;
+  }
+  if (reglages.planReplie && facadeEdition !== meuble.id) {
+    zone.innerHTML = `<button class="plan-replie" data-action="plan-replier"><span class="h4">Vue de face</span>${icone("chevron-down")}</button>`;
+    return;
+  }
+  const edition = facadeEdition === meuble.id;
+  zone.innerHTML = facadeHTML(cols, { focus, edition })
+    + (edition
+      ? `<div class="fa-barre"><button class="btn" data-fa="colonne">${icone("plus")}Colonne</button><button class="btn" data-fa="modele">Modèle</button><button class="btn plein" data-fa="fini">${icone("check")}OK</button></div>`
+      : `<div class="plan-outils"><button class="btn-icone petit" data-fa="modifier" aria-label="Modifier la façade">${icone("pencil")}</button>
+         <button class="btn-icone petit" data-action="plan-replier" aria-label="Replier">${icone("chevron-up")}</button></div>`);
+}
+const meubleFacade = () => trouverFacade(elements.get(dansId))?.meuble;
+
+// Nouvelle case (élément « Case » rangé dans le meuble)
+function nouvelleCase(m, genre, deja) {
+  return { id: nouvelId(), nom: nomCase(genre, deja), type: "case", parent: m.id, note: "", tags: [], photo: "", historique: [], cree: Date.now(), plan: null, facade: null };
+}
+const genresDe = cols => cols.flatMap(c => c.cases.map(k => k.genre));
+
+function appliquerModele(cle) {
+  const m = meubleFacade();
+  if (!m) return;
+  const anciennes = colonnesValides(m).flatMap(c => c.cases.map(k => k.id));
+  if (anciennes.length && !confirm("Remplacer la façade ? Le contenu des cases actuelles reviendra dans le meuble.")) return;
+  // Les anciennes cases disparaissent ; leur contenu revient dans le meuble
+  const sortis = anciennes.flatMap(id => enfants(id)).map(x => ({ ...x, parent: m.id }));
+  const genres = [], nouvelles = [];
+  const cols = MODELES_FACADE[cle].cols.map(([w, ...cases]) => ({
+    w, cases: cases.map(([genre, h]) => { const c = nouvelleCase(m, genre, genres); genres.push(genre); nouvelles.push(c); return { id: c.id, h, genre }; })
+  }));
+  if (anciennes.length) effacer(anciennes);
+  ecrire([{ ...m, facade: { cols } }, ...nouvelles, ...sortis]);
+  facadeEdition = m.id;
+  retour();
+}
+function ouvrirModeles() {
+  ouvrirVoile(`<div class="f-tete"><h2>Vue de face</h2><button class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button></div>
+    <div class="fa-modeles">${Object.entries(MODELES_FACADE).map(([k, md]) => `<button data-modele="${k}">
+      ${facadeHTML(md.cols.map(([w, ...cs]) => ({ w, cases: cs.map(([genre, h]) => ({ id: "", h, genre })) })), { mini: true })}<span>${md.nom}</span></button>`).join("")}</div>`, "modeles");
+}
+
+// Réglages d'une case (mode modifier) : nom, genre, hauteur, largeur de sa colonne
+function ouvrirCase(ci, ki) {
+  const m = meubleFacade(), cols = colonnesValides(m), k = cols[ci]?.cases[ki];
+  if (!k) return;
+  const e = elements.get(k.id);
+  const seg = (nom, val) => [1, 2, 3].map(v => `<button data-${nom}="${v}" aria-pressed="${v === val}">${["Petite", "Moyenne", "Grande"][v - 1]}</button>`).join("");
+  ouvrirVoile(`<div class="f-tete"><h2>Case</h2><button class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button></div>
+    <input id="c-nom" class="champ" value="${echapper(e.nom)}" maxlength="40" placeholder="Nom">
+    <div class="c-genres">${Object.entries(GENRES).map(([g, n]) => `<button data-genre="${g}" aria-pressed="${g === k.genre}">${n}</button>`).join("")}</div>
+    <div class="reg-mini"><span>Hauteur</span><div class="seg">${seg("haut", k.h)}</div></div>
+    <div class="reg-mini"><span>Largeur</span><div class="seg">${seg("larg", cols[ci].w)}</div></div>
+    <div class="f-actions"><button class="btn" data-action="case-dessous">${icone("plus")}Case dessous</button>
+      <button class="btn danger" data-action="case-suppr">${icone("trash")}Supprimer</button></div>`, "case", k.id);
+  form = { ci, ki };
+}
+// Modifie la façade du meuble ouvert (cols = copie valide) puis enregistre
+function majFacade(change, extra = []) {
+  const m = meubleFacade();
+  if (!m) return;
+  const cols = JSON.parse(JSON.stringify(colonnesValides(m)));
+  change(cols, m);
+  ecrire([{ ...m, facade: normaliserFacade({ cols }) }, ...extra]);
+}
+function supprimerCase(id) {
+  const m = meubleFacade(), e = elements.get(id);
+  if (!m || !e) return;
+  const copies = [elements.get(m.id), e, ...enfants(id)];
+  const sortis = enfants(id).map(x => ({ ...x, parent: m.id }));
+  majFacade(cols => cols.forEach(c => { c.cases = c.cases.filter(k => k.id !== id); }), sortis);
+  effacer([id]);
+  retour();
+  afficherToast(`${e.nom} supprimée`, () => ecrire(copies));
 }
 
 // Plan au-dessus de la liste : celui du lieu (élément tout en haut), recentré sur la pièce reliée
@@ -328,9 +475,12 @@ let aSurligner = "";
 function afficherAccueil() {
   const q = $("recherche").value.trim();
   $("effacer-recherche").hidden = !q;
-  if (q) { $("plan").hidden = true; afficherResultats(q); return; }
+  if (q) { $("plan").hidden = $("facade").hidden = true; afficherResultats(q); return; }
   const cur = elements.get(dansId);
-  afficherPlan(cur);
+  // Dans un meuble (ou une de ses cases) : sa façade à la place du plan
+  const fac = trouverFacade(cur);
+  $("facade").hidden = !fac;
+  if (fac) { $("plan").hidden = true; afficherFacade(fac); } else afficherPlan(cur);
   const fil = cur ? [...ancetres(cur), cur] : [];
   $("fil").hidden = false;
   $("fil").innerHTML = `<button class="fil-bout" data-dans="">${icone("home")}Tout</button>`
@@ -561,6 +711,7 @@ function supprimer(id) {
   afficherToast(ids.length > 1 ? `${e.nom} et son contenu supprimés` : `${e.nom} supprimé`, () => ecrire(copies));
 }
 
+let minuteurNomCase = null;
 let ignorerClic = false;   // juste après un glisser, le « clic » du lâcher ne doit rien ouvrir
 document.addEventListener("click", ev => {
   if (ignorerClic) { ev.preventDefault(); ev.stopPropagation(); return; }
@@ -592,6 +743,25 @@ document.addEventListener("click", ev => {
       else if (a === "photo") $("f-fichier").click();
       else if (a === "retirer-photo") { form.photo = ""; majPhotoForm(); }
       else if (a === "enreg-autre") enregistrerFormulaire(true);
+      else if (a === "case-suppr") supprimerCase(voileId);
+      else if (a === "case-dessous") {
+        const { ci, ki } = form, m = meubleFacade();
+        const k = colonnesValides(m)[ci].cases[ki], c = nouvelleCase(m, k.genre, genresDe(colonnesValides(m)));
+        majFacade(cols => cols[ci].cases.splice(ki + 1, 0, { id: c.id, h: 1, genre: k.genre }), [c]);
+        retour();
+      }
+      return;
+    }
+    if ((b = el("[data-modele]"))) { appliquerModele(b.dataset.modele); return; }
+    if (voileType === "case" && (b = el("[data-genre], [data-haut], [data-larg]"))) {
+      const { ci, ki } = form;
+      majFacade(cols => {
+        const k = cols[ci].cases[ki];
+        if (b.dataset.genre) k.genre = b.dataset.genre;
+        if (b.dataset.haut) k.h = +b.dataset.haut;
+        if (b.dataset.larg) cols[ci].w = +b.dataset.larg;
+      });
+      ouvrirCase(ci, ki);
       return;
     }
     if ((b = el("[data-vers]"))) { $("recherche").value = ""; remplacer("dans=" + b.dataset.vers); return; }
@@ -610,6 +780,31 @@ document.addEventListener("click", ev => {
   if ((b = el("[data-dans]"))) { $("recherche").value = ""; b.dataset.dans ? aller("dans=" + b.dataset.dans) : remplacer(""); return; }
   if ((b = el("[data-fiche]"))) { aller("fiche=" + b.dataset.fiche); return; }
   if ((b = el("[data-plan-edit]"))) { aller("plan=" + b.dataset.planEdit); return; }
+  // Vue de face
+  if ((b = el("[data-ouvre]")) && !facadeEdition) {
+    const e = elements.get(b.dataset.ouvre);
+    if (e) estContenant(e) ? aller("dans=" + e.id) : aller("fiche=" + e.id);
+    return;
+  }
+  if ((b = el("[data-case]"))) {
+    facadeEdition ? aller(`case=${b.dataset.ci}-${b.dataset.ki}`) : aller("dans=" + b.dataset.case);
+    return;
+  }
+  if ((b = el("[data-fa]"))) {
+    const a = b.dataset.fa, m = meubleFacade();
+    if (a === "modele") aller("modeles");
+    else if (a === "modifier") { facadeEdition = m.id; afficherAccueil(); }
+    else if (a === "fini") { facadeEdition = ""; afficherAccueil(); }
+    else if (a === "colonne") {
+      const c = nouvelleCase(m, "etagere", genresDe(colonnesValides(m)));
+      majFacade(cols => cols.push({ w: 1, cases: [{ id: c.id, h: 1, genre: "etagere" }] }), [c]);
+    } else if (a === "ajout-case") {
+      const ci = +b.dataset.ci, cols0 = colonnesValides(m), der = cols0[ci].cases.at(-1);
+      const c = nouvelleCase(m, der.genre, genresDe(cols0));
+      majFacade(cols => cols[ci].cases.push({ id: c.id, h: 1, genre: der.genre }), [c]);
+    }
+    return;
+  }
   if (el("[data-action='plan-replier']")) { changerReglage("planReplie", !reglages.planReplie); afficherAccueil(); return; }
   if ((b = el(".plan-vue [data-lien]"))) {
     const e = elements.get(b.dataset.lien);
@@ -630,6 +825,11 @@ document.addEventListener("submit", ev => { ev.preventDefault(); if (ev.target.i
 document.addEventListener("input", ev => {
   if (ev.target.id === "recherche") afficherAccueil();
   else if (ev.target.id === "f-tags") majSuggestions();
+  else if (ev.target.id === "c-nom") {   // nom d'une case : enregistré après une petite pause
+    clearTimeout(minuteurNomCase);
+    const id = voileId, nom = ev.target.value.trim();
+    minuteurNomCase = setTimeout(() => { const e = elements.get(id); if (e && nom && e.nom !== nom) ecrire([{ ...e, nom }]); }, 500);
+  }
 });
 document.addEventListener("change", async ev => {
   if (ev.target.id !== "f-fichier" || !ev.target.files[0]) return;
@@ -707,7 +907,8 @@ function suivreGlisse(e) {
 function chercherCible() {
   const g = glisse;
   const sous = document.elementFromPoint(g.x, g.y);
-  let c = sous && (sous.closest(".ligne") || sous.closest(".fil-bout") || sous.closest(".plan-vue [data-lien]"));
+  let c = sous && (sous.closest(".ligne") || sous.closest(".fil-bout") || sous.closest(".plan-vue [data-lien]")
+    || sous.closest(".fa-boite.contenant") || sous.closest(".fa-case[data-case]"));
   if (c?.dataset.lien && !elements.has(c.dataset.lien)) c = null;
   const id = c ? cibleId(c) : null;
   const parent = elements.get(g.id)?.parent || "";
@@ -731,7 +932,7 @@ function lacherGlisse(ok) {
   ignorerClic = true; setTimeout(() => { ignorerClic = false; }, 60);
   if (ok && g.cible) deplacer(g.id, cibleId(g.cible));
 }
-const cibleId = c => c.dataset.lien ?? c.dataset.id ?? c.dataset.dans;   // dessin du plan : son lien, pas son id de dessin
+const cibleId = c => c.dataset.lien ?? c.dataset.ouvre ?? c.dataset.case ?? c.dataset.id ?? c.dataset.dans;   // dessin du plan : son lien, pas son id de dessin
 
 // ---------- 8. Excel ----------
 // Une feuille « Inventaire » dans l'ordre de l'arbre (nom décalé selon la profondeur),
@@ -767,10 +968,11 @@ $("btn-export").addEventListener("click", async () => {
       if (p.gras) c.font = { bold: true };
     });
     // Plans : un onglet à part, le plan en texte (JSON) pour pouvoir le réimporter tel quel
-    const plans = [...elements.values()].filter(e => !planVide(e.plan));
+    const plans = [...elements.values()].filter(e => !planVide(e.plan) || e.facade);
     if (plans.length) ajouterFeuille(wb, "Plans", [
-      { header: "Lieu", key: "nom", width: 24 }, { header: "ID", key: "id", width: 12 }, { header: "Plan", key: "plan", width: 60 }
-    ], plans.map(e => ({ nom: e.nom, id: e.id, plan: JSON.stringify(e.plan) })), { hauteur: 21 });
+      { header: "Nom", key: "nom", width: 24 }, { header: "ID", key: "id", width: 12 },
+      { header: "Plan", key: "plan", width: 40 }, { header: "Façade", key: "facade", width: 40 }
+    ], plans.map(e => ({ nom: e.nom, id: e.id, plan: planVide(e.plan) ? "" : JSON.stringify(e.plan), facade: e.facade ? JSON.stringify(e.facade) : "" })), { hauteur: 21 });
     await telechargerClasseur(wb, NOM_APPLI);
   } catch (err) { afficherToast("Export impossible : " + err.message, null); }
 });
@@ -785,9 +987,13 @@ $("fichier-import").addEventListener("change", async ev => {
     const ws = wb.getWorksheet("Inventaire") || wb.worksheets[0];
     const images = imagesParLigne(wb, ws);
     const plans = new Map();
+    const facades = new Map();
+    const lireJSON = c => { try { const t = String(c.text || "").trim(); return t ? JSON.parse(t) : null; } catch (e) { return null; } };   // illisible : ignoré
     wb.getWorksheet("Plans")?.eachRow((rang, n) => {
       if (n === 1) return;
-      try { plans.set(String(rang.getCell(2).text).trim(), JSON.parse(String(rang.getCell(3).text))); } catch (e) { /* plan illisible : ignoré */ }
+      const id = String(rang.getCell(2).text).trim();
+      plans.set(id, lireJSON(rang.getCell(3)));
+      facades.set(id, lireJSON(rang.getCell(4)));
     });
     const cols = {};
     ws.getRow(1).eachCell((c, i) => { cols[simplifier(c.text)] = i; });
@@ -814,7 +1020,7 @@ $("fichier-import").addEventListener("change", async ev => {
     const anciens = [...elements.keys()].filter(id => !ids.has(id));
     const avant = new Map(elements);
     effacer(anciens);
-    ecrire(lus.map(l => normaliser(l.id, { ...l, parent: l.parentId, plan: plans.get(l.id), historique: avant.get(l.id)?.historique || [], cree: avant.get(l.id)?.cree || Date.now() })));
+    ecrire(lus.map(l => normaliser(l.id, { ...l, parent: l.parentId, plan: plans.get(l.id), facade: facades.get(l.id), historique: avant.get(l.id)?.historique || [], cree: avant.get(l.id)?.cree || Date.now() })));
     afficherToast(`${lus.length} éléments importés`, null);
     remplacer("");
   } catch (err) { afficherToast("Import impossible : " + err.message, null); }
