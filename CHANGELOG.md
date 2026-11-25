@@ -1,5 +1,15 @@
 # Inventaire — journal des nouveautés
 
+## 0.6.0 — 2026-11-25
+Navigation et listes.
+- Onglets en bas : Maison, Objets, Escalier.
+- Objets : tous les objets sans leurs contenants, classés par pièce, A → Z, récents ou par tag ; la recherche filtre la liste.
+- Escalier : l'arbre décalé selon la profondeur, chaque contenant se replie / se déplie, niveaux « De … À … » (ex. de Meuble à Case).
+- Lieu principal (étoile, menu « ⋯ » d'un lieu) : l'accueil montre son plan et ses pièces, puis « Autres lieux ».
+- « Voir l'endroit » : pop-up qui zoome du plan entier vers la pièce, allume le meuble, puis montre la vue de face avec la case et l'objet allumés. Toucher pour sauter ; « Y aller ».
+- Glisser : seule une étiquette (icône + nom) suit le doigt ; rester ½ s sur un endroit (fil d'Ariane, contenant, pièce du plan, case) l'ouvre sans lâcher ; lâcher sur la liste range ici ; petites vibrations.
+- Plan de l'accueil : se déplace au doigt et se zoome à deux doigts (molette sur PC), y compris avec un 2e doigt pendant un glisser.
+
 ## 0.5.0 — 2026-11-25
 Rangement des objets.
 - Pastilles « À ranger », « Mobile », « Introuvable » (dans la liste, la fiche et le formulaire) et puces-filtres sous la recherche quand il y en a.

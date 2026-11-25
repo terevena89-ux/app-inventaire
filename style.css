@@ -417,3 +417,41 @@ button.reg:active { background: var(--appui); }
 .fa-sep.bas { height: 18px; margin-top: -2px; cursor: row-resize; }
 .fa-sep.bas::after { left: 40%; right: 40%; top: 6px; height: 5px; }
 .fa-sep.tire::after { opacity: 1; }
+
+/* ---------- v0.6 : onglets, escalier, lieu principal, Voir l'endroit, glisser ---------- */
+.liste { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+.onglets { position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; display: flex; max-width: 640px; margin: 0 auto;
+  padding: 4px 6px calc(4px + env(safe-area-inset-bottom)); background: var(--carte); border-top: 1px solid var(--trait); }
+.onglets button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; height: 48px; justify-content: center;
+  border-radius: 10px; color: var(--discret); font-size: 11.5px; font-weight: 600; }
+.onglets button .ic { width: 21px; height: 21px; }
+.onglets button[aria-current="page"] { color: var(--accent); background: var(--accent-doux); }
+.onglet-outils { display: flex; gap: 8px; align-items: center; padding: 0 10px 6px; }
+.seg-large { display: flex; width: 100%; }
+.seg-large button { flex: 1; }
+.esc-choix { display: flex; align-items: center; gap: 6px; flex: 1; color: var(--discret); font-size: 13px; }
+.esc-choix select { flex: 1; min-width: 0; height: 34px; padding: 0 6px; border: 1px solid var(--trait); border-radius: 8px; background: var(--carte); color: var(--texte); }
+.groupe-titre { padding: 12px 6px 4px; color: var(--accent); }
+.ligne.esc { min-height: 40px; gap: 6px; }
+.ligne.esc .vign { width: 28px; height: 28px; }
+.ligne.esc .vign .ic { width: 16px; height: 16px; }
+.esc-fleche { flex: none; width: 24px; height: 28px; display: grid; place-items: center; color: var(--discret); }
+.esc-fleche .ic { width: 16px; height: 16px; }
+.courant b .ic { width: 15px; height: 15px; color: var(--accent); fill: var(--accent); vertical-align: -2px; }
+.scene { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; cursor: pointer; }
+.sc-plan { border: 1px solid var(--trait); border-radius: 10px; background: var(--fond); overflow: hidden; }
+.sc-plan .plan-vue { height: 200px; }
+.sc-facade.apparait { animation: apparait .35s ease-out; }
+@keyframes apparait { from { opacity: 0; transform: translateY(8px); } }
+.scene .pl-meuble.actif *, .scene .pl-piece.actif { animation: pulse 1.2s ease-in-out 2; }
+@keyframes pulse { 50% { opacity: .45; } }
+.fa-boite.actif { background: var(--accent-fond); border-color: var(--accent-fond); color: #fff; }
+.etiquette { position: fixed; left: 0; top: 0; z-index: 60; display: flex; align-items: center; gap: 6px; max-width: 220px; padding: 4px 10px 4px 4px;
+  border-radius: 10px; background: var(--carte); border: 1px solid var(--trait); box-shadow: var(--ombre); pointer-events: none; font-weight: 600; font-size: 14px; }
+.etiquette span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.etiquette .vign { width: 30px; height: 30px; }
+.ligne.souleve { opacity: .35; }
+#liste.cible { outline: 2px dashed var(--accent); outline-offset: -4px; border-radius: 10px; background: var(--accent-doux); }
+.survol { animation: survol .6s ease-out; }
+@keyframes survol { from { box-shadow: inset 0 0 0 0 var(--accent); } to { box-shadow: inset 0 0 0 3px var(--accent); } }
+.plan-vue { touch-action: none; }

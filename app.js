@@ -16,11 +16,11 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { ajouterFeuille, telechargerClasseur, lireClasseur, chargerExcelJS } from "./excel-style.js";
-import { normaliserPlan, planVide, vueHTML, ouvrirEditeur, fermerEditeur, editeurOuvert } from "./plan.js";
+import { normaliserPlan, planVide, vueHTML, ouvrirEditeur, fermerEditeur, editeurOuvert, cadrage, contenuSVG } from "./plan.js";
 
 // ---------- 1. Base et données ----------
 
-const VERSION = "v0.5.0";
+const VERSION = "v0.6.0";
 const NOM_APPLI = "app-inventaire";
 
 // Tout est un « élément » (lieu, pièce, meuble, boîte, objet) rangé dans un autre (parent).
@@ -73,6 +73,7 @@ function normaliser(id, d) {
     cree: Number(d.cree) || 0,
     plan: normaliserPlan(d.plan),        // seulement pour un lieu (plan.js)
     facade: normaliserFacade(d.facade),  // seulement pour un meuble (vue de face)
+    principal: !!d.principal,           // lieu montré en grand sur l'accueil (étoile)
     etat: ETATS[d.etat] ? d.etat : "",   // pastille : à ranger / introuvable
     mobile: !!d.mobile,                  // objet qui bouge souvent (pas d'endroit fixe)
     quantite: d.quantite === "" || d.quantite == null || !Number.isFinite(+d.quantite) ? null : Math.max(0, Math.round(+d.quantite)),
@@ -279,7 +280,7 @@ function ouvrirVoile(html, type, id = "") {
   $("voile").hidden = false;
   voileType = type; voileId = id;
 }
-function fermerVoile() { $("voile").hidden = true; $("voile").innerHTML = ""; voileType = voileId = ""; form = null; }
+function fermerVoile() { cancelAnimationFrame(animEndroit); clearTimeout(animEndroit); $("voile").hidden = true; $("voile").innerHTML = ""; voileType = voileId = ""; form = null; }
 
 function router() {
   if (!MODE_DEMO && !uid) return;
@@ -293,6 +294,9 @@ function router() {
   montrer("accueil");
   if (cle === "dans") dansId = elements.has(val) ? val : "";
   else if (!cle) dansId = "";
+  // Onglet du bas : #objets / #escalier ; un endroit ouvert = onglet Maison ; une fiche garde l'onglet en cours
+  if (cle === "objets" || cle === "escalier") onglet = cle;
+  else if (cle === "dans" || !cle) onglet = "maison";
   if (cle === "plan") { fermerVoile(); ouvrirPlan(val); }
   else fermerEditeur();
   afficherAccueil();
@@ -301,6 +305,7 @@ function router() {
   else if (cle === "ajouter") { if (voileType !== "form") ouvrirFormulaire(null, elements.has(val) ? val : ""); }
   else if (cle === "deplacer") { if (voileType !== "deplacer") ouvrirDeplacer(val); }
   else if (cle === "sortir") { if (voileType !== "sortir") ouvrirSortir(val); }
+  else if (cle === "endroit") { if (voileType !== "endroit") ouvrirEndroit(val); }
   else if (cle === "verifier") { if (voileType !== "verifier") ouvrirVerifier(val); }
   else if (cle === "modeles") { if (voileType !== "modeles") ouvrirModeles(); }
   else if (cle === "case") { const [ci, ki] = val.split("-").map(Number); if (voileType !== "case") ouvrirCase(ci, ki); }
@@ -365,7 +370,7 @@ function facadeHTML(cols, o = {}) {
       const e = elements.get(k.id), kids = o.mini ? [] : enfants(k.id);
       return sepH(ci, ki) + `<div class="fa-case g-${k.genre}${k.id && k.id === o.focus ? " actif" : ""}" style="flex:${k.h}"${o.mini ? "" : ` data-case="${k.id}" data-ci="${ci}" data-ki="${ki}"`}>
         <span class="fa-nom">${echapper(o.mini ? "" : e?.nom)}</span>
-        ${kids.length ? `<div class="fa-contenu">${kids.map(x => `<span class="fa-boite${estContenant(x) ? " contenant" : ""}" data-ouvre="${x.id}">${x.photo ? `<img src="${x.photo}" alt="">` : ""}${echapper(x.nom)}</span>`).join("")}</div>` : ""}
+        ${kids.length ? `<div class="fa-contenu">${kids.map(x => `<span class="fa-boite${estContenant(x) ? " contenant" : ""}${x.id === o.objet ? " actif" : ""}" data-ouvre="${x.id}">${x.photo ? `<img src="${x.photo}" alt="">` : ""}${echapper(x.nom)}</span>`).join("")}</div>` : ""}
       </div>`;
     }).join("")
     + (o.edition ? `<button class="fa-plus" data-fa="ajout-case" data-ci="${ci}" aria-label="Ajouter une case">${icone("plus")}</button>` : "")
@@ -560,33 +565,111 @@ let aSurligner = "";
 function afficherAccueil() {
   const q = $("recherche").value.trim();
   $("effacer-recherche").hidden = !q;
+  document.querySelectorAll("[data-onglet]").forEach(b => b.setAttribute("aria-current", b.dataset.onglet === onglet ? "page" : "false"));
+  // Onglets Objets et Escalier (la recherche reste générale dans l'escalier)
+  const autre = onglet === "objets" || (onglet === "escalier" && !q);
+  $("vue-onglet").hidden = $("onglet-outils").hidden = !autre;
+  $("liste").hidden = autre;
+  if (autre) {
+    ["fil", "courant", "plan", "facade", "filtres"].forEach(i => { $(i).hidden = true; });
+    if (onglet === "objets") afficherObjets(q); else afficherEscalier();
+    return;
+  }
   const cur0 = elements.get(dansId);
   afficherFiltres(!cur0 || !!filtre);
   if (q || filtre) { $("plan").hidden = $("facade").hidden = true; afficherResultats(q); return; }
   const cur = cur0;
+  // Accueil : le lieu marqué « principal » (étoile) montre son plan et ses pièces ; les autres lieux en dessous
+  const principal = cur ? null : [...elements.values()].find(e => e.principal && !e.archive && !e.parent);
   // Dans un meuble (ou une de ses cases) : sa façade à la place du plan
   const fac = trouverFacade(cur);
   $("facade").hidden = !fac;
-  if (fac) { $("plan").hidden = true; afficherFacade(fac); } else afficherPlan(cur);
+  if (fac) { $("plan").hidden = true; afficherFacade(fac); } else afficherPlan(cur || principal);
   const fil = cur ? [...ancetres(cur), cur] : [];
   $("fil").hidden = false;
   $("fil").innerHTML = `<button class="fil-bout" data-dans="">${icone("home")}Tout</button>`
     + fil.map(a => `<span class="sep">›</span><button class="fil-bout" data-dans="${a.id}">${echapper(a.nom)}</button>`).join("");
   $("fil").scrollLeft = $("fil").scrollWidth;
-  $("courant").hidden = !cur;
-  if (cur) {
-    const infos = [TYPES[cur.type].nom, ...cur.tags].join(" · ");
-    $("courant").innerHTML = `${vignette(cur)}<div class="c-txt"><b>${echapper(cur.nom)}</b><span>${echapper(infos)}${cur.note ? " · " + echapper(cur.note) : ""}</span></div>
-      <button class="btn-icone" data-fiche="${cur.id}" aria-label="Fiche">${icone("dots")}</button>`;
+  const tete = cur || principal;
+  $("courant").hidden = !tete;
+  if (tete) {
+    const infos = [TYPES[tete.type].nom, ...tete.tags].join(" · ");
+    $("courant").innerHTML = `${vignette(tete)}<div class="c-txt"><b>${echapper(tete.nom)}${tete.principal ? ` ${icone("star")}` : ""}</b><span>${echapper(infos)}${tete.note ? " · " + echapper(tete.note) : ""}</span></div>
+      <button class="btn-icone" data-fiche="${tete.id}" aria-label="Fiche">${icone("dots")}</button>`;
   }
-  const liste = enfants(dansId);
-  $("liste").innerHTML = liste.length ? liste.map(e => ligneHTML(e, false)).join("")
-    : `<div class="vide">${cur ? "Vide" : ""}<br><button class="btn" data-action="ajouter-ici">${icone("plus")}${cur ? "Ajouter" : "Ajouter un lieu"}</button></div>`;
+  // Lâcher un objet glissé sur la liste (pas sur une ligne) = le ranger ici
+  $("liste").dataset.depot = tete ? tete.id : "";
+  const liste = enfants(tete ? tete.id : "");
+  const autres = principal ? enfants("").filter(e => e.id !== principal.id) : [];
+  $("liste").innerHTML = (liste.length ? liste.map(e => ligneHTML(e, false)).join("")
+    : `<div class="vide">${tete ? "Vide" : ""}<br><button class="btn" data-action="ajouter-ici">${icone("plus")}${tete ? "Ajouter" : "Ajouter un lieu"}</button></div>`)
+    + (autres.length ? `<div class="groupe-titre h4">Autres lieux</div>` + autres.map(e => ligneHTML(e, false)).join("") : "");
   if (aSurligner) {
     const l = $("liste").querySelector(`[data-id="${aSurligner}"]`);
     if (l) { l.classList.add("eclair"); l.scrollIntoView({ block: "center" }); }
     aSurligner = "";
   }
+}
+
+// ---------- Onglet Objets : tous les objets, sans les contenants ----------
+let onglet = "maison";
+const TRIS = { piece: "Pièce", az: "A→Z", recents: "Récents", tags: "Tags" };
+const dateActivite = e => Math.max(e.cree || 0, e.historique.at(-1)?.le || 0);   // ajout ou dernier déplacement
+function afficherObjets(q) {
+  const tri = TRIS[reglages.triObjets] ? reglages.triObjets : "piece";
+  $("onglet-outils").innerHTML = `<div class="seg seg-large">${Object.entries(TRIS).map(([k, n]) => `<button data-tri="${k}" aria-pressed="${k === tri}">${n}</button>`).join("")}</div>`;
+  const mots = simplifier(q).split(/\s+/).filter(Boolean);
+  const l = [...elements.values()].filter(e => !e.archive && e.type === "objet"
+    && mots.every(m => simplifier([e.nom, ...e.tags, e.note, cheminTexte(e)].join(" ")).includes(m)));
+  let groupes;
+  if (tri === "az") groupes = [["", l.sort(triNom)]];
+  else if (tri === "recents") groupes = [["", l.sort((a, b) => dateActivite(b) - dateActivite(a))]];
+  else {
+    const m = new Map(), ajouter = (k, e) => { if (!m.has(k)) m.set(k, []); m.get(k).push(e); };
+    const SANS = tri === "tags" ? "Sans tag" : "À ranger · Mobiles";
+    if (tri === "tags") l.forEach(e => (e.tags.length ? e.tags : [SANS]).forEach(t => ajouter(t, e)));
+    else l.forEach(e => {
+      const a = ancetres(e), p = a.find(x => x.type === "piece") || a[0];
+      ajouter(p ? cheminComplet(p) : SANS, e);
+    });
+    // « À ranger · Mobiles » en premier, « Sans tag » en dernier
+    groupes = [...m].sort(([a], [b]) => (a === SANS) - (b === SANS) || a.localeCompare(b, "fr", { numeric: true }))
+      .map(([k, xs]) => [k, xs.sort(triNom)]);
+    if (tri === "piece") groupes.sort(([a], [b]) => (b === SANS) - (a === SANS));
+  }
+  $("vue-onglet").innerHTML = l.length
+    ? groupes.map(([t, xs]) => (t ? `<div class="groupe-titre h4">${echapper(t)}</div>` : "") + xs.map(e => ligneHTML(e, true)).join("")).join("")
+    : `<p class="vide">${q ? "Rien trouvé" : "Aucun objet"}</p>`;
+}
+
+// ---------- Onglet Escalier : l'arbre, décalé selon la profondeur, de tel niveau à tel niveau ----------
+const CLE_PLIES = "inv-plies";
+const lirePlies = () => { try { return new Set(JSON.parse(localStorage.getItem(CLE_PLIES)) || []); } catch (e) { return new Set(); } };
+function plier(id) {
+  const s = lirePlies();
+  s.has(id) ? s.delete(id) : s.add(id);
+  try { localStorage.setItem(CLE_PLIES, JSON.stringify([...s])); } catch (e) { /* rien */ }
+}
+function afficherEscalier() {
+  let de = ORDRE_TYPES.indexOf(reglages.escDe), a = ORDRE_TYPES.indexOf(reglages.escA);
+  if (de < 0) de = 0;
+  if (a < 0) a = ORDRE_TYPES.length - 1;
+  if (a < de) [de, a] = [a, de];
+  const options = sel => ORDRE_TYPES.map((t, i) => `<option value="${t}"${i === sel ? " selected" : ""}>${TYPES[t].nom}</option>`).join("");
+  $("onglet-outils").innerHTML = `<label class="esc-choix">De<select id="esc-de">${options(de)}</select></label><label class="esc-choix">À<select id="esc-a">${options(a)}</select></label>`;
+  const plies = lirePlies(), rang = e => ORDRE_TYPES.indexOf(e.type);
+  // Un niveau au-dessus de « De » est sauté (ses enfants remontent), un niveau au-delà de « À » est caché
+  const visibles = id => enfants(id).flatMap(k => rang(k) > a ? [] : rang(k) < de ? visibles(k.id) : [k]);
+  let html = "";
+  const parcourir = (liste, niv) => liste.forEach(e => {
+    const kids = visibles(e.id), plie = plies.has(e.id);
+    html += `<div class="ligne esc${estContenant(e) ? " contenant" : ""}${e.quantite === 0 ? " epuise" : ""}" data-id="${e.id}" style="padding-left:${4 + niv * 16}px">
+      ${kids.length ? `<button class="esc-fleche" data-plier="${e.id}" aria-label="${plie ? "Déplier" : "Replier"}">${icone(plie ? "chevron-right" : "chevron-down")}</button>` : `<span class="esc-fleche"></span>`}
+      ${vignette(e)}<span class="l-nom"><span class="l-n">${echapper(e.nom)}</span>${qteHTML(e)}${pastillesHTML(e)}</span></div>`;
+    if (kids.length && !plie) parcourir(kids, niv + 1);
+  });
+  parcourir(visibles(""), 0);
+  $("vue-onglet").innerHTML = html || `<p class="vide">Rien à ce niveau</p>`;
 }
 
 // Recherche : chaque mot doit se trouver dans le nom, les tags, la note ou l'emplacement.
@@ -620,6 +703,7 @@ function ouvrirFiche(id) {
         <div class="menu" hidden>
           <button data-action="modifier">${icone("pencil")}Modifier</button>
           ${kids.length ? `<button data-action="verifier">${icone("check")}Vérifier le contenu</button>` : ""}
+          ${e.type === "lieu" && !e.parent ? `<button data-action="principal">${icone("star")}${e.principal ? "Plus lieu principal" : "Lieu principal"}</button>` : ""}
           <button data-action="sortir" class="danger">${icone("archive")}Sortir de l'inventaire</button>
         </div></div>
       <button class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button>
@@ -637,7 +721,7 @@ function ouvrirFiche(id) {
     <div class="f-actions">
       ${e.etat === "introuvable" ? `<button class="btn plein" data-action="retrouve">${icone("check")}Retrouvé</button>` : ""}
       <button class="btn${e.etat === "introuvable" ? "" : " plein"}" data-action="deplacer">${icone("transfer")}${e.etat === "aranger" || (!e.parent && e.type === "objet") ? "Ranger" : "Déplacer"}</button>
-      ${cont || anc.length ? `<button class="btn" data-action="ouvrir">${icone(cont ? "chevron-right" : "map-pin")}${cont ? "Ouvrir" : "Voir l'endroit"}</button>` : ""}
+      ${cont || anc.length ? `<button class="btn" data-action="${cont ? "ouvrir" : "endroit"}">${icone(cont ? "chevron-right" : "map-pin")}${cont ? "Ouvrir" : "Voir l'endroit"}</button>` : ""}
     </div>
     ${e.historique.length ? `<details class="f-histo"><summary>${icone("history")}Anciens endroits</summary>
       ${[...e.historique].reverse().map(h => `<div class="h-ligne"><span>${echapper(h.de || "Tout en haut")}</span><span class="date">${dateCourte(h.le)}</span></div>`).join("")}
@@ -858,6 +942,49 @@ function supprimer(id) {
   afficherToast(ids.length > 1 ? `${e.nom} et son contenu supprimés` : `${e.nom} supprimé`, () => ecrire(copies));
 }
 
+// --- Voir l'endroit : pop-up qui zoome du plan entier vers la pièce, allume le meuble,
+// puis montre sa vue de face avec la case (et l'objet) allumés. Toucher = sauter l'animation. ---
+let animEndroit = 0;
+const boxTexte = b => `${b.x} ${b.y} ${b.w} ${b.h}`;
+const animationsReduites = () => document.documentElement.dataset.anim === "simples" || matchMedia("(prefers-reduced-motion: reduce)").matches;
+function ouvrirEndroit(id) {
+  const e = elements.get(id);
+  if (!e) { fermerVoile(); return; }
+  const anc = ancetres(e), chaine = [e, ...[...anc].reverse()], lieu = anc[0] || e;
+  const plan = planVide(lieu.plan) ? null : lieu.plan;
+  const iM = chaine.findIndex(x => x.facade), meuble = iM > 0 ? chaine[iM] : null;
+  const cols = meuble ? colonnesValides(meuble) : [];
+  let b0 = null, b1 = null, svg = "";
+  if (plan) {
+    const c = cadrage(plan, chaine.map(x => x.id));
+    b0 = cadrage(plan, []).box; b1 = c.box;
+    const k = Math.max(b1.w / 340, b1.h / 190);
+    svg = `<svg class="plan-vue" viewBox="${boxTexte(b0)}" preserveAspectRatio="xMidYMid meet">${contenuSVG(plan, { focus: c.focus, k, nom: i => elements.get(i)?.nom || "" })}</svg>`;
+  }
+  ouvrirVoile(`<div class="f-tete"><h2>${echapper(e.nom)}</h2><button class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button></div>
+    <div class="f-chemin">${icone("map-pin")}<span>${echapper(cheminTexte(e) || "Tout en haut")}</span></div>
+    <div class="scene" id="scene">
+      ${svg ? `<div class="sc-plan">${svg}</div>` : ""}
+      ${cols.length ? `<div class="sc-facade"${svg ? " hidden" : ""}>${facadeHTML(cols, { focus: chaine[iM - 1].id, objet: e.id, ratio: meuble.facade.ratio })}</div>` : ""}
+      ${!svg && !cols.length ? `<p class="vide">Pas de plan pour ce lieu</p>` : ""}
+    </div>
+    <div class="f-actions"><button class="btn plein" data-action="ouvrir">${icone("map-pin")}Y aller</button></div>`, "endroit", id);
+  const scene = $("scene"), sv = scene.querySelector("svg"), fa = scene.querySelector(".sc-facade");
+  const montrerFacade = () => { if (fa && fa.hidden) { fa.hidden = false; fa.classList.add("apparait"); navigator.vibrate?.(8); } };
+  const fin = () => { cancelAnimationFrame(animEndroit); clearTimeout(animEndroit); if (sv) sv.setAttribute("viewBox", boxTexte(b1)); montrerFacade(); };
+  scene.addEventListener("click", fin);
+  if (!sv || animationsReduites()) { fin(); return; }
+  // Zoom doux (accélère puis ralentit) du plan entier vers la pièce, après un court temps de pause
+  const t0 = performance.now() + 350, D = 900;
+  const pas = now => {
+    const t = Math.min(1, Math.max(0, (now - t0) / D)), s = t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    sv.setAttribute("viewBox", ["x", "y", "w", "h"].map(c => b0[c] + (b1[c] - b0[c]) * s).join(" "));
+    if (t < 1) animEndroit = requestAnimationFrame(pas);
+    else animEndroit = setTimeout(montrerFacade, 450);
+  };
+  animEndroit = requestAnimationFrame(pas);
+}
+
 // --- Sortir de l'inventaire (archive) ---
 function ouvrirSortir(id) {
   const e = elements.get(id);
@@ -955,6 +1082,12 @@ document.addEventListener("click", ev => {
       else if (a === "modifier") remplacer("modifier=" + voileId);
       else if (a === "supprimer") supprimer(voileId);
       else if (a === "sortir") remplacer("sortir=" + voileId);
+      else if (a === "principal") {   // un seul lieu principal
+        const e = elements.get(voileId), devient = !e.principal;
+        ecrire([...elements.values()].filter(x => x.principal && x.id !== e.id).map(x => ({ ...x, principal: false })).concat([{ ...e, principal: devient }]));
+        afficherToast(devient ? `${e.nom} : lieu principal` : `${e.nom} n'est plus le lieu principal`, null);
+      }
+      else if (a === "endroit") remplacer("endroit=" + voileId);
       else if (a === "verifier") remplacer("verifier=" + voileId);
       else if (a === "verif-tout") $("voile").querySelectorAll("[data-verif]").forEach(c => { c.checked = true; });
       else if (a === "verif-fini") finirVerifier();
@@ -1023,6 +1156,15 @@ document.addEventListener("click", ev => {
   }
 
   // Accueil
+  if ((b = el("[data-onglet]"))) {
+    const k = b.dataset.onglet;
+    if (k === onglet && k === "maison") { $("recherche").value = ""; remplacer(""); return; }   // 2e toucher sur Maison = retour à l'accueil
+    remplacer(k === "maison" ? (dansId ? "dans=" + dansId : "") : k);
+    window.scrollTo(0, 0);
+    return;
+  }
+  if ((b = el("[data-tri]"))) { changerReglage("triObjets", b.dataset.tri); afficherAccueil(); return; }
+  if ((b = el("[data-plier]"))) { plier(b.dataset.plier); afficherAccueil(); return; }
   if ((b = el("[data-filtre]"))) { filtre = filtre === b.dataset.filtre ? "" : b.dataset.filtre; afficherAccueil(); return; }
   if ((b = el("[data-dans]"))) { $("recherche").value = ""; b.dataset.dans ? aller("dans=" + b.dataset.dans) : remplacer(""); return; }
   if ((b = el("[data-fiche]"))) { aller("fiche=" + b.dataset.fiche); return; }
@@ -1058,7 +1200,8 @@ document.addEventListener("click", ev => {
     if (e) estContenant(e) ? aller("dans=" + e.id) : aller("fiche=" + e.id);
     return;
   }
-  if ((b = el("[data-action='ajouter-ici']")) || t.closest("#btn-ajouter")) { aller("ajouter=" + ($("recherche").value.trim() ? "" : dansId)); return; }
+  if (el("[data-action='ajouter-ici']")) { aller("ajouter=" + ($("liste").dataset.depot || "")); return; }
+  if (t.closest("#btn-ajouter")) { aller("ajouter=" + ($("recherche").value.trim() || onglet !== "maison" ? "" : dansId)); return; }
   if ((b = el(".ligne"))) {
     const e = elements.get(b.dataset.id);
     if (!e) return;
@@ -1078,6 +1221,9 @@ document.addEventListener("input", ev => {
     const id = voileId, nom = ev.target.value.trim();
     minuteurNomCase = setTimeout(() => { const e = elements.get(id); if (e && nom && e.nom !== nom) ecrire([{ ...e, nom }]); }, 500);
   }
+});
+document.addEventListener("change", ev => {
+  if (ev.target.id === "esc-de" || ev.target.id === "esc-a") { changerReglage(ev.target.id === "esc-de" ? "escDe" : "escA", ev.target.value); afficherAccueil(); }
 });
 document.addEventListener("change", async ev => {
   const id = ev.target.id, f = ev.target.files?.[0];
@@ -1100,76 +1246,105 @@ $("ouvrir-notes").addEventListener("click", () => {
   NotesIdees.ouvrir(donnees.idees, texte => { donnees.idees = texte; sauverDonnees(); });
 });
 
-// ---------- 7. Glisser une ligne sur un contenant ou sur le fil d'Ariane ----------
+// ---------- 7. Glisser un objet vers un autre endroit ----------
 // Téléphone : appui long (0,35 s) puis glisser. PC : glisser direct à la souris.
-// Le défilement est bloqué seulement une fois la ligne attrapée (touchmove non passif) :
+// Seule une étiquette (icône + nom) suit le doigt. Rester ½ s sur un endroit (fil d'Ariane,
+// contenant, pièce du plan, case) l'ouvre sans lâcher : on peut remonter puis redescendre ailleurs.
+// Un 2e doigt sur le plan le déplace / zoome pendant ce temps.
+// Le défilement est bloqué seulement une fois l'objet attrapé (touchmove non passif) :
 // avant, un doigt qui bouge = on fait défiler la liste normalement.
 let glisse = null;
-$("liste").addEventListener("pointerdown", ev => {
-  const ligne = ev.target.closest(".ligne");
-  if (!ligne || ev.button > 0 || $("recherche").value.trim()) return;
-  const depart = { x: ev.clientX, y: ev.clientY }, doigt = ev.pointerId, souris = ev.pointerType === "mouse";
-  let minuteur = souris ? null : setTimeout(() => attraper(ligne, depart, doigt), 350);
-  const bouger = e => {
-    if (e.pointerId !== doigt) return;
-    if (!glisse) {
-      const loin = Math.hypot(e.clientX - depart.x, e.clientY - depart.y) > 8;
-      if (loin && souris) attraper(ligne, depart, doigt);
-      else if (loin) { clearTimeout(minuteur); finir(); return; }
-      else return;
-    }
-    suivreGlisse(e);
-  };
-  const lacher = e => {
-    if (e.pointerId !== doigt) return;
-    clearTimeout(minuteur); finir();
-    if (glisse) lacherGlisse(e.type === "pointerup");
-  };
-  const finir = () => {
-    document.removeEventListener("pointermove", bouger);
-    document.removeEventListener("pointerup", lacher);
-    document.removeEventListener("pointercancel", lacher);
-  };
-  document.addEventListener("pointermove", bouger);
-  document.addEventListener("pointerup", lacher);
-  document.addEventListener("pointercancel", lacher);
-});
+const OUVRIR_APRES = 600;
+function brancherGlisser(zone) {
+  zone.addEventListener("pointerdown", ev => {
+    const ligne = ev.target.closest(".ligne");
+    if (!ligne || ev.target.closest("[data-plier]") || ev.button > 0 || glisse) return;
+    if (zone === $("liste") && $("recherche").value.trim()) return;
+    const depart = { x: ev.clientX, y: ev.clientY }, doigt = ev.pointerId, souris = ev.pointerType === "mouse";
+    const minuteur = souris ? null : setTimeout(() => attraper(ligne, depart, doigt), 350);
+    const bouger = e => {
+      if (e.pointerId !== doigt) return;
+      if (!glisse) {
+        const loin = Math.hypot(e.clientX - depart.x, e.clientY - depart.y) > 8;
+        if (loin && souris) attraper(ligne, depart, doigt);
+        else if (loin) { clearTimeout(minuteur); finir(); return; }
+        else return;
+      }
+      suivreGlisse(e);
+    };
+    const lacher = e => {
+      if (e.pointerId !== doigt) return;
+      clearTimeout(minuteur); finir();
+      if (glisse) lacherGlisse(e.type === "pointerup");
+    };
+    const finir = () => {
+      document.removeEventListener("pointermove", bouger);
+      document.removeEventListener("pointerup", lacher);
+      document.removeEventListener("pointercancel", lacher);
+    };
+    document.addEventListener("pointermove", bouger);
+    document.addEventListener("pointerup", lacher);
+    document.addEventListener("pointercancel", lacher);
+  });
+  zone.addEventListener("contextmenu", ev => { if (ev.target.closest(".ligne")) ev.preventDefault(); });
+}
+brancherGlisser($("liste"));
+brancherGlisser($("vue-onglet"));
 document.addEventListener("touchmove", ev => { if (glisse) ev.preventDefault(); }, { passive: false });
-$("liste").addEventListener("contextmenu", ev => { if (ev.target.closest(".ligne")) ev.preventDefault(); });
 
 function attraper(ligne, depart, doigt) {
-  const r = ligne.getBoundingClientRect();
-  const fantome = ligne.cloneNode(true);
-  fantome.classList.add("fantome");
-  Object.assign(fantome.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px" });
-  document.body.appendChild(fantome);
+  const e = elements.get(ligne.dataset.id);
+  if (!e) return;
+  const etiquette = document.createElement("div");
+  etiquette.className = "etiquette";
+  etiquette.innerHTML = `${vignette(e)}<span>${echapper(e.nom)}</span>`;
+  document.body.appendChild(etiquette);
   ligne.classList.add("souleve");
-  glisse = { id: ligne.dataset.id, ligne, fantome, dy: depart.y - r.top, x: depart.x, y: depart.y, cible: null, doigt,
-    interdits: new Set([ligne.dataset.id, ...descendants(ligne.dataset.id)]), defile: 0 };
+  glisse = { id: e.id, ligne, etiquette, x: depart.x, y: depart.y, cible: null, survol: null, minuteur: 0, doigt,
+    interdits: new Set([e.id, ...descendants(e.id)]), defile: 0 };
+  placerEtiquette();
   navigator.vibrate?.(12);
   defilerAuto();
 }
+// L'étiquette flotte au-dessus du doigt (sinon le doigt la cache)
+function placerEtiquette() { glisse.etiquette.style.transform = `translate(${glisse.x - 22}px, ${glisse.y - 62}px)`; }
 function suivreGlisse(e) {
   const g = glisse;
   g.x = e.clientX; g.y = e.clientY;
-  g.fantome.style.top = (g.y - g.dy) + "px";
-  g.defile = g.y < 70 ? -1 : g.y > innerHeight - 70 ? 1 : 0;
+  placerEtiquette();
+  g.defile = g.y < 70 ? -1 : g.y > innerHeight - 140 ? 1 : 0;
   chercherCible();
 }
+const elementVise = c => c && (c.dataset.lien && !elements.has(c.dataset.lien) ? null : c);
 function chercherCible() {
   const g = glisse;
   const sous = document.elementFromPoint(g.x, g.y);
-  let c = sous && (sous.closest(".ligne") || sous.closest(".fil-bout") || sous.closest(".plan-vue [data-lien]")
+  let c = sous && elementVise(sous.closest(".ligne") || sous.closest(".fil-bout") || sous.closest(".plan-vue [data-lien]")
     || sous.closest(".fa-boite.contenant") || sous.closest(".fa-case[data-case]"));
-  if (c?.dataset.lien && !elements.has(c.dataset.lien)) c = null;
+  // Ailleurs sur la liste (ou sur l'en-tête de l'endroit ouvert) : ranger ici
+  if (!c && sous && (sous.closest("#liste") || sous.closest("#courant")) && !$("liste").hidden) c = $("liste");
   const id = c ? cibleId(c) : null;
+  if (c && g.interdits.has(id)) c = null;
+  if (c === g.cible) return;
+  g.cible?.classList.remove("cible", "survol");
+  clearTimeout(g.minuteur);
+  g.cible = c;
+  if (!c) return;
   const parent = elements.get(g.id)?.parent || "";
-  if (c && (g.interdits.has(id) || id === parent)) c = null;
-  if (c !== g.cible) {
-    g.cible?.classList.remove("cible");
-    c?.classList.add("cible");
-    g.cible = c;
-  }
+  if (cibleId(c) !== parent) c.classList.add("cible");
+  // Survol prolongé d'un endroit qui s'ouvre (pas la liste elle-même, pas un objet)
+  const vise = elements.get(cibleId(c));
+  const ouvrable = c !== $("liste") && (c.classList.contains("fil-bout") || (vise && estContenant(vise)));
+  if (!ouvrable) return;
+  c.classList.add("survol");
+  g.minuteur = setTimeout(() => {
+    if (glisse !== g || g.cible !== c) return;
+    const dest = cibleId(c);
+    navigator.vibrate?.(8);
+    g.cible = null;
+    remplacer(dest ? "dans=" + dest : "");
+    setTimeout(() => { if (glisse === g) chercherCible(); }, 80);   // la page a changé sous le doigt
+  }, OUVRIR_APRES);
 }
 function defilerAuto() {
   if (!glisse) return;
@@ -1178,13 +1353,68 @@ function defilerAuto() {
 }
 function lacherGlisse(ok) {
   const g = glisse; glisse = null;
-  g.fantome.remove();
+  clearTimeout(g.minuteur);
+  g.etiquette.remove();
   g.ligne.classList.remove("souleve");
-  g.cible?.classList.remove("cible");
+  document.querySelectorAll(".souleve").forEach(x => x.classList.remove("souleve"));
+  g.cible?.classList.remove("cible", "survol");
   ignorerClic = true; setTimeout(() => { ignorerClic = false; }, 60);
-  if (ok && g.cible) deplacer(g.id, cibleId(g.cible));
+  if (ok && g.cible) { deplacer(g.id, cibleId(g.cible)); navigator.vibrate?.(15); }
 }
-const cibleId = c => c.dataset.lien ?? c.dataset.ouvre ?? c.dataset.case ?? c.dataset.id ?? c.dataset.dans;   // dessin du plan : son lien, pas son id de dessin
+// Id visé : dessin du plan = son lien (pas son id de dessin) ; liste = l'endroit ouvert
+const cibleId = c => c.dataset.lien ?? c.dataset.ouvre ?? c.dataset.case ?? c.dataset.id ?? c.dataset.dans ?? c.dataset.depot;
+
+// ---------- Plan de l'accueil : déplacer (1 doigt, souris) et zoomer (2 doigts, molette) ----------
+// Marche aussi avec un 2e doigt pendant qu'on glisse un objet avec le 1er.
+const pv = { ptrs: new Map(), svg: null, vb0: null, d0: 0, m0: null, bouge: false };
+const lireVB = svg => { const [x, y, w, h] = svg.getAttribute("viewBox").split(" ").map(Number); return { x, y, w, h }; };
+function echellePlan(svg, vb) { const r = svg.getBoundingClientRect(); return { r, s: Math.max(vb.w / r.width, vb.h / r.height) }; }
+function departGeste() {
+  const p = [...pv.ptrs.values()];
+  pv.vb0 = lireVB(pv.svg);
+  pv.m0 = p.length > 1 ? { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 } : { ...p[0] };
+  pv.d0 = p.length > 1 ? Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1 : 0;
+}
+$("plan").addEventListener("pointerdown", ev => {
+  const svg = ev.target.closest(".plan-vue");
+  if (!svg || (glisse && ev.pointerId === glisse.doigt)) return;
+  pv.svg = svg;
+  pv.ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  if (pv.ptrs.size === 1) pv.bouge = false;
+  departGeste();
+});
+document.addEventListener("pointermove", ev => {
+  if (!pv.ptrs.has(ev.pointerId)) return;
+  pv.ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  const p = [...pv.ptrs.values()], vb0 = pv.vb0, { r, s } = echellePlan(pv.svg, vb0);
+  const m = p.length > 1 ? { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 } : p[0];
+  if (!pv.bouge && Math.hypot(m.x - pv.m0.x, m.y - pv.m0.y) < 5 && p.length < 2) return;
+  pv.bouge = true;
+  const z = p.length > 1 ? Math.min(8, Math.max(0.15, pv.d0 / (Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1))) : 1;
+  // Le point du plan sous le centre des doigts au départ reste sous le centre des doigts
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const px = vb0.x + vb0.w / 2 + (pv.m0.x - cx) * s, py = vb0.y + vb0.h / 2 + (pv.m0.y - cy) * s;
+  const w = vb0.w * z, h = vb0.h * z, s2 = s * z;
+  pv.svg.setAttribute("viewBox", `${px - (m.x - cx) * s2 - w / 2} ${py - (m.y - cy) * s2 - h / 2} ${w} ${h}`);
+});
+const finGestePlan = ev => {
+  if (!pv.ptrs.has(ev.pointerId)) return;
+  pv.ptrs.delete(ev.pointerId);
+  if (pv.bouge) { ignorerClic = true; setTimeout(() => { ignorerClic = false; }, 60); }
+  if (pv.ptrs.size) departGeste();
+};
+document.addEventListener("pointerup", finGestePlan);
+document.addEventListener("pointercancel", finGestePlan);
+$("plan").addEventListener("wheel", ev => {
+  const svg = ev.target.closest(".plan-vue");
+  if (!svg) return;
+  ev.preventDefault();
+  const vb = lireVB(svg), { r, s } = echellePlan(svg, vb), z = ev.deltaY > 0 ? 1.15 : 1 / 1.15;
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const px = vb.x + vb.w / 2 + (ev.clientX - cx) * s, py = vb.y + vb.h / 2 + (ev.clientY - cy) * s;
+  const w = vb.w * z, h = vb.h * z;
+  svg.setAttribute("viewBox", `${px - (ev.clientX - cx) * s * z - w / 2} ${py - (ev.clientY - cy) * s * z - h / 2} ${w} ${h}`);
+}, { passive: false });
 
 // ---------- 8. Excel ----------
 // Une feuille « Inventaire » dans l'ordre de l'arbre (nom décalé selon la profondeur),
