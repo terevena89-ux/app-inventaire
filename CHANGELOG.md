@@ -1,5 +1,16 @@
 # Inventaire — journal des nouveautés
 
+## 0.5.0 — 2026-11-25
+Rangement des objets.
+- Pastilles « À ranger », « Mobile », « Introuvable » (dans la liste, la fiche et le formulaire) et puces-filtres sous la recherche quand il y en a.
+- Un objet tapé sans endroit tombe tout seul dans « À ranger » ; le ranger (Déplacer / glisser) retire la pastille.
+- Quantité facultative « ×6 », boutons − / + dans la fiche ; à 0 l'objet reste, grisé.
+- Achat et garantie : date d'achat, prix, fin de garantie (+1 an / +2 ans), badge « sous garantie », photo de la facture (plus grande, lisible).
+- Vérifier le contenu d'un contenant (menu « ⋯ ») : ce qui n'est pas coché devient « Introuvable » ; bouton « Retrouvé » dans la fiche.
+- « Sortir de l'inventaire » (Jeté, Donné, Vendu, Perdu, Autre) avec son contenu, Annuler possible ; écran Réglages › Archive pour chercher, restaurer ou supprimer pour de bon.
+- Vue de face modelée au doigt (crayon) : tirer les séparateurs entre cases et colonnes, et la barre du bas pour la hauteur du meuble.
+- Excel : nouvelles colonnes (quantité, état, mobile, achat, garantie, prix) et onglet « Archive ».
+
 ## 0.4.0 — 2026-11-25
 Plan plus pratique à dessiner.
 - Pièces : on les agrandit en tirant un mur (petite barre au milieu). Les coins ne se tirent qu'avec le bouton « Angles » (qui garde le « + » pour ajouter un coin) ; un mur en biais se tire aussi en entier.

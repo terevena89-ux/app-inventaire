@@ -20,7 +20,7 @@ import { normaliserPlan, planVide, vueHTML, ouvrirEditeur, fermerEditeur, editeu
 
 // ---------- 1. Base et données ----------
 
-const VERSION = "v0.4.0";
+const VERSION = "v0.5.0";
 const NOM_APPLI = "app-inventaire";
 
 // Tout est un « élément » (lieu, pièce, meuble, boîte, objet) rangé dans un autre (parent).
@@ -72,19 +72,38 @@ function normaliser(id, d) {
       ? d.historique.filter(h => h && typeof h.de === "string").map(h => ({ de: h.de, le: Number(h.le) || 0 })).slice(-MAX_HISTO) : [],
     cree: Number(d.cree) || 0,
     plan: normaliserPlan(d.plan),        // seulement pour un lieu (plan.js)
-    facade: normaliserFacade(d.facade)   // seulement pour un meuble (vue de face)
+    facade: normaliserFacade(d.facade),  // seulement pour un meuble (vue de face)
+    etat: ETATS[d.etat] ? d.etat : "",   // pastille : à ranger / introuvable
+    mobile: !!d.mobile,                  // objet qui bouge souvent (pas d'endroit fixe)
+    quantite: d.quantite === "" || d.quantite == null || !Number.isFinite(+d.quantite) ? null : Math.max(0, Math.round(+d.quantite)),
+    achat: normaliserAchat(d.achat),
+    // Sorti de l'inventaire (jeté, donné…) : gardé pour l'écran Archive. avec = id de l'élément sorti avec lui (son contenant)
+    archive: d.archive && d.archive.le ? { raison: RAISONS[d.archive.raison] ? d.archive.raison : "autre", le: Number(d.archive.le) || 0,
+      de: String(d.archive.de || ""), avec: String(d.archive.avec || "") } : null
   };
 }
+const ETATS = { aranger: "À ranger", introuvable: "Introuvable" };
+const RAISONS = { jete: "Jeté", donne: "Donné", vendu: "Vendu", perdu: "Perdu", autre: "Autre" };
+// Achat = { date, garantie (AAAA-MM-JJ), prix (€), facture (photo) } ; null si rien n'est rempli
+function normaliserAchat(a) {
+  if (!a || typeof a !== "object") return null;
+  const jour = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : "";
+  const r = { date: jour(a.date), garantie: jour(a.garantie),
+    prix: a.prix === "" || a.prix == null || !Number.isFinite(+a.prix) ? null : Math.round(+a.prix * 100) / 100,
+    facture: typeof a.facture === "string" && a.facture.startsWith("data:image/") ? a.facture : "" };
+  return r.date || r.garantie || r.prix != null || r.facture ? r : null;
+}
 // Façade = colonnes de cases empilées : { cols: [{ w, cases: [{ id, h, genre }] }] }
-// id = l'élément « Case » (enfant du meuble) ; w / h = largeur / hauteur relatives (1 à 3).
+// id = l'élément « Case » (enfant du meuble) ; w / h = largeur / hauteur relatives ; ratio = hauteur / largeur du dessin.
 const GENRES = { etagere: "Étagère", tiroir: "Tiroir", penderie: "Penderie", porte: "Porte", dessus: "Dessus", dessous: "Dessous" };
 function normaliserFacade(f) {
   if (!f || !Array.isArray(f.cols)) return null;
-  const t = v => Math.min(3, Math.max(1, Math.round(Number(v) || 1)));
+  const t = v => Math.min(50, Math.max(0.1, Math.round((Number(v) || 1) * 100) / 100));   // tailles relatives, modelées à la main (v0.5)
   const cols = f.cols.filter(c => c && Array.isArray(c.cases)).map(c => ({
     w: t(c.w), cases: c.cases.filter(k => k && k.id).map(k => ({ id: String(k.id), h: t(k.h), genre: GENRES[k.genre] ? k.genre : "etagere" }))
   })).filter(c => c.cases.length);
-  return cols.length ? { cols } : null;
+  const ratio = Number(f.ratio) >= 0.2 && Number(f.ratio) <= 4 ? Math.round(Number(f.ratio) * 1000) / 1000 : null;   // hauteur / largeur du dessin
+  return cols.length ? { cols, ratio } : null;
 }
 
 // ---------- 2. Stockage ----------
@@ -205,7 +224,8 @@ let parParent = new Map();
 function indexer() {
   parParent = new Map();
   for (const e of elements.values()) {
-    const p = elements.has(e.parent) && e.parent !== e.id ? e.parent : "";
+    if (e.archive) continue;   // sortis de l'inventaire : seulement dans l'écran Archive
+    const p = elements.has(e.parent) && e.parent !== e.id && !elements.get(e.parent).archive ? e.parent : "";
     if (!parParent.has(p)) parParent.set(p, []);
     parParent.get(p).push(e);
   }
@@ -245,7 +265,7 @@ function aller(adresse) { aNavigue = true; location.hash = adresse; }
 function remplacer(adresse) { location.replace("#" + adresse); }
 function retour() { if (aNavigue) history.back(); else remplacer(""); }
 
-const MODALES = ["reglages", "theme"];
+const MODALES = ["reglages", "theme", "archive"];
 function montrer(nom) {
   document.querySelectorAll(".ecran").forEach(e => {
     const n = e.id.slice(6);
@@ -267,7 +287,7 @@ function router() {
   const [cle, val = ""] = h.split("=");
   if (MODALES.includes(cle)) {
     fermerVoile(); montrer(cle);
-    if (cle === "reglages") afficherReglages(); else afficherTheme();
+    if (cle === "reglages") afficherReglages(); else if (cle === "archive") afficherArchive(); else afficherTheme();
     return;
   }
   montrer("accueil");
@@ -280,6 +300,8 @@ function router() {
   else if (cle === "modifier") { if (voileType !== "form") ouvrirFormulaire(elements.get(val), null); }
   else if (cle === "ajouter") { if (voileType !== "form") ouvrirFormulaire(null, elements.has(val) ? val : ""); }
   else if (cle === "deplacer") { if (voileType !== "deplacer") ouvrirDeplacer(val); }
+  else if (cle === "sortir") { if (voileType !== "sortir") ouvrirSortir(val); }
+  else if (cle === "verifier") { if (voileType !== "verifier") ouvrirVerifier(val); }
   else if (cle === "modeles") { if (voileType !== "modeles") ouvrirModeles(); }
   else if (cle === "case") { const [ci, ki] = val.split("-").map(Number); if (voileType !== "case") ouvrirCase(ci, ki); }
   else if (cle !== "plan") fermerVoile();
@@ -332,12 +354,16 @@ function colonnesValides(m) {
   return (m.facade?.cols || []).map(c => ({ ...c, cases: c.cases.filter(k => elements.get(k.id)?.parent === m.id) })).filter(c => c.cases.length);
 }
 function facadeHTML(cols, o = {}) {
-  const lignes = Math.max(...cols.map(c => c.cases.reduce((s, k) => s + k.h, 0)));
-  const H = o.mini ? 64 : Math.min(300, Math.max(130, lignes * 44));
-  return `<div class="fa-cadre${o.edition ? " edition" : ""}${o.mini ? " mini" : ""}" style="height:${H}px">` + cols.map((c, ci) => `<div class="fa-col" style="flex:${c.w}">`
+  const lignes = Math.max(...cols.map(c => c.cases.length));
+  const W = $("facade").clientWidth || 364;
+  const H = o.mini ? 64 : o.ratio ? Math.round(Math.min(520, Math.max(90, W * o.ratio))) : Math.min(300, Math.max(130, lignes * 44));
+  // En mode modifier : séparateurs à tirer entre les cases, entre les colonnes, et sous le meuble
+  const sepH = (ci, ki) => o.edition && ki ? `<div class="fa-sep h" data-sep="h" data-ci="${ci}" data-ki="${ki}"></div>` : "";
+  const sepV = ci => o.edition && ci ? `<div class="fa-sep v" data-sep="v" data-ci="${ci}"></div>` : "";
+  return `<div class="fa-cadre${o.edition ? " edition" : ""}${o.mini ? " mini" : ""}" style="height:${H}px">` + cols.map((c, ci) => sepV(ci) + `<div class="fa-col" style="flex:${c.w}">`
     + c.cases.map((k, ki) => {
       const e = elements.get(k.id), kids = o.mini ? [] : enfants(k.id);
-      return `<div class="fa-case g-${k.genre}${k.id && k.id === o.focus ? " actif" : ""}" style="flex:${k.h}"${o.mini ? "" : ` data-case="${k.id}" data-ci="${ci}" data-ki="${ki}"`}>
+      return sepH(ci, ki) + `<div class="fa-case g-${k.genre}${k.id && k.id === o.focus ? " actif" : ""}" style="flex:${k.h}"${o.mini ? "" : ` data-case="${k.id}" data-ci="${ci}" data-ki="${ki}"`}>
         <span class="fa-nom">${echapper(o.mini ? "" : e?.nom)}</span>
         ${kids.length ? `<div class="fa-contenu">${kids.map(x => `<span class="fa-boite${estContenant(x) ? " contenant" : ""}" data-ouvre="${x.id}">${x.photo ? `<img src="${x.photo}" alt="">` : ""}${echapper(x.nom)}</span>`).join("")}</div>` : ""}
       </div>`;
@@ -356,13 +382,59 @@ function afficherFacade({ meuble, focus }) {
     return;
   }
   const edition = facadeEdition === meuble.id;
-  zone.innerHTML = facadeHTML(cols, { focus, edition })
+  zone.innerHTML = facadeHTML(cols, { focus, edition, ratio: meuble.facade?.ratio })
     + (edition
-      ? `<div class="fa-barre"><button class="btn" data-fa="colonne">${icone("plus")}Colonne</button><button class="btn" data-fa="modele">Modèle</button><button class="btn plein" data-fa="fini">${icone("check")}OK</button></div>`
+      ? `<div class="fa-sep bas" data-sep="bas" aria-label="Hauteur du meuble"></div><div class="fa-barre"><button class="btn" data-fa="colonne">${icone("plus")}Colonne</button><button class="btn" data-fa="modele">Modèle</button><button class="btn plein" data-fa="fini">${icone("check")}OK</button></div>`
       : `<div class="plan-outils"><button class="btn-icone petit" data-fa="modifier" aria-label="Modifier la façade">${icone("pencil")}</button>
          <button class="btn-icone petit" data-action="plan-replier" aria-label="Replier">${icone("chevron-up")}</button></div>`);
 }
 const meubleFacade = () => trouverFacade(elements.get(dansId))?.meuble;
+
+// Modeler la façade au doigt : on tire un séparateur, les deux voisins se partagent la place
+// (tailles en poids relatifs) ; la barre du bas change la hauteur du meuble (ratio hauteur / largeur).
+$("facade").addEventListener("pointerdown", ev => {
+  const sep = ev.target.closest("[data-sep]");
+  if (!sep) return;
+  ev.preventDefault();
+  try { sep.setPointerCapture(ev.pointerId); } catch (e) { /* doigt déjà levé */ }
+  const cadre = $("facade").querySelector(".fa-cadre"), type = sep.dataset.sep;
+  let a, b;
+  if (type === "h") { b = sep.nextElementSibling; a = sep.previousElementSibling; }
+  if (type === "v") { b = sep.nextElementSibling; a = sep.previousElementSibling; }
+  const depart = type === "v" ? ev.clientX : ev.clientY;
+  const ta = a ? (type === "v" ? a.offsetWidth : a.offsetHeight) : 0, tb = b ? (type === "v" ? b.offsetWidth : b.offsetHeight) : 0;
+  const H0 = cadre.offsetHeight;
+  const somme = a && b ? parseFloat(a.style.flex) + parseFloat(b.style.flex) : 0;   // poids des deux voisins (inchangé)
+  sep.classList.add("tire");
+  const bouger = e => {
+    const d = (type === "v" ? e.clientX : e.clientY) - depart;
+    if (type === "bas") { cadre.style.height = Math.min(520, Math.max(90, H0 + d)) + "px"; return; }
+    const na = Math.max(22, Math.min(ta + tb - 22, ta + d));
+    a.style.flex = String(somme * na / (ta + tb)); b.style.flex = String(somme * (ta + tb - na) / (ta + tb));
+  };
+  const lacher = () => {
+    sep.removeEventListener("pointermove", bouger);
+    sep.removeEventListener("pointerup", lacher);
+    sep.removeEventListener("pointercancel", lacher);
+    sep.classList.remove("tire");
+    const m = meubleFacade();
+    if (!m) return;
+    if (type === "bas") {
+      ecrire([{ ...m, facade: normaliserFacade({ ...m.facade, cols: colonnesValides(m), ratio: cadre.offsetHeight / cadre.offsetWidth }) }]);
+      return;
+    }
+    // Nouveaux poids = tailles à l'écran, rapportées à la somme des deux poids d'avant
+    const ci = +sep.dataset.ci, ki = +sep.dataset.ki, la = parseFloat(a.style.flex), lb = parseFloat(b.style.flex);
+    majFacade(cols => {
+      const [x, y] = type === "v" ? [cols[ci - 1], cols[ci]] : [cols[ci].cases[ki - 1], cols[ci].cases[ki]];
+      const cle = type === "v" ? "w" : "h", somme = x[cle] + y[cle];
+      x[cle] = somme * la / (la + lb); y[cle] = somme * lb / (la + lb);
+    });
+  };
+  sep.addEventListener("pointermove", bouger);
+  sep.addEventListener("pointerup", lacher);
+  sep.addEventListener("pointercancel", lacher);
+});
 
 // Nouvelle case (élément « Case » rangé dans le meuble)
 function nouvelleCase(m, genre, deja) {
@@ -401,8 +473,6 @@ function ouvrirCase(ci, ki) {
   ouvrirVoile(`<div class="f-tete"><h2>Case</h2><button class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button></div>
     <input id="c-nom" class="champ" value="${echapper(e.nom)}" maxlength="40" placeholder="Nom">
     <div class="c-genres">${Object.entries(GENRES).map(([g, n]) => `<button data-genre="${g}" aria-pressed="${g === k.genre}">${n}</button>`).join("")}</div>
-    <div class="reg-mini"><span>Hauteur</span><div class="seg">${seg("haut", k.h)}</div></div>
-    <div class="reg-mini"><span>Largeur</span><div class="seg">${seg("larg", cols[ci].w)}</div></div>
     <div class="f-actions"><button class="btn" data-action="case-dessous">${icone("plus")}Case dessous</button>
       <button class="btn danger" data-action="case-suppr">${icone("trash")}Supprimer</button></div>`, "case", k.id);
   form = { ci, ki };
@@ -413,7 +483,7 @@ function majFacade(change, extra = []) {
   if (!m) return;
   const cols = JSON.parse(JSON.stringify(colonnesValides(m)));
   change(cols, m);
-  ecrire([{ ...m, facade: normaliserFacade({ cols }) }, ...extra]);
+  ecrire([{ ...m, facade: normaliserFacade({ cols, ratio: m.facade?.ratio }) }, ...extra]);
 }
 function supprimerCase(id) {
   const m = meubleFacade(), e = elements.get(id);
@@ -463,20 +533,37 @@ const vignette = e => e.photo
   ? `<img class="vign" src="${e.photo}" alt="">`
   : `<span class="vign t-${e.type}">${icone(TYPES[e.type].ic)}</span>`;
 
+// Pastilles (à ranger, introuvable, mobile) et quantité « ×6 »
+const pastillesHTML = e => (e.etat ? `<span class="pastille p-${e.etat}">${ETATS[e.etat]}</span>` : "")
+  + (e.mobile ? `<span class="pastille p-mobile">Mobile</span>` : "");
+const qteHTML = e => e.quantite != null ? `<span class="qte">×${e.quantite}</span>` : "";
 function ligneHTML(e, avecChemin) {
   const kids = enfants(e.id), cont = estContenant(e);
-  const sous = avecChemin ? (cheminTexte(e) || "Tout en haut") : kids.map(k => k.nom).join(", ");
-  return `<div class="ligne${cont ? " contenant" : ""}" data-id="${e.id}">${vignette(e)}
-    <div class="l-txt"><span class="l-nom">${echapper(e.nom)}</span>${sous ? `<span class="l-sous">${echapper(sous)}</span>` : ""}</div>
+  const sous = avecChemin ? (cheminTexte(e) || (e.mobile ? "" : "Tout en haut")) : kids.map(k => k.nom).join(", ");
+  return `<div class="ligne${cont ? " contenant" : ""}${e.quantite === 0 ? " epuise" : ""}" data-id="${e.id}">${vignette(e)}
+    <div class="l-txt"><span class="l-nom"><span class="l-n">${echapper(e.nom)}</span>${qteHTML(e)}${pastillesHTML(e)}</span>${sous ? `<span class="l-sous">${echapper(sous)}</span>` : ""}</div>
     ${cont && !avecChemin ? icone("chevron-right") : ""}</div>`;
+}
+
+// Puces-filtres sous la recherche (seulement s'il y a quelque chose à montrer)
+let filtre = "";
+const FILTRES = { aranger: ["À ranger", e => e.etat === "aranger"], mobile: ["Mobiles", e => e.mobile], introuvable: ["Introuvables", e => e.etat === "introuvable"] };
+function afficherFiltres(visible) {
+  const actifs = [...elements.values()].filter(e => !e.archive);
+  const puces = Object.entries(FILTRES).map(([k, [nom, f]]) => [k, nom, actifs.filter(f).length]).filter(([k, , n]) => n || filtre === k);
+  if (filtre && !puces.some(([k]) => k === filtre)) filtre = "";
+  $("filtres").hidden = !visible || !puces.length;
+  $("filtres").innerHTML = puces.map(([k, nom, n]) => `<button class="filtre p-${k}" data-filtre="${k}" aria-pressed="${filtre === k}">${nom} <b>${n}</b></button>`).join("");
 }
 
 let aSurligner = "";
 function afficherAccueil() {
   const q = $("recherche").value.trim();
   $("effacer-recherche").hidden = !q;
-  if (q) { $("plan").hidden = $("facade").hidden = true; afficherResultats(q); return; }
-  const cur = elements.get(dansId);
+  const cur0 = elements.get(dansId);
+  afficherFiltres(!cur0 || !!filtre);
+  if (q || filtre) { $("plan").hidden = $("facade").hidden = true; afficherResultats(q); return; }
+  const cur = cur0;
   // Dans un meuble (ou une de ses cases) : sa façade à la place du plan
   const fac = trouverFacade(cur);
   $("facade").hidden = !fac;
@@ -509,6 +596,9 @@ function afficherResultats(q) {
   const tag = q.startsWith("#") ? simplifier(q.slice(1)) : "";
   const mots = simplifier(q).split(/\s+/).filter(Boolean);
   const res = [...elements.values()].filter(e => {
+    if (e.archive) return false;
+    if (filtre && !FILTRES[filtre][1](e)) return false;
+    if (!q) return true;
     if (tag) return e.tags.some(t => simplifier(t) === tag);
     const texte = simplifier([e.nom, ...e.tags, e.note, cheminTexte(e)].join(" "));
     return mots.every(m => texte.includes(m));
@@ -525,27 +615,54 @@ function ouvrirFiche(id) {
   ouvrirVoile(`
     ${e.photo ? `<img class="f-photo" src="${e.photo}" alt="">` : ""}
     <div class="f-tete">${e.photo ? "" : vignette(e)}
-      <div class="f-titre"><h2>${echapper(e.nom)}</h2><span class="f-type">${TYPES[e.type].nom}</span></div>
+      <div class="f-titre"><h2>${echapper(e.nom)}</h2><span class="f-type">${TYPES[e.type].nom}</span>${pastillesHTML(e)}</div>
       <div class="menu-wrap"><button class="btn-icone" data-action="menu" aria-label="Plus">${icone("dots")}</button>
         <div class="menu" hidden>
           <button data-action="modifier">${icone("pencil")}Modifier</button>
-          <button data-action="supprimer" class="danger">${icone("trash")}Supprimer</button>
+          ${kids.length ? `<button data-action="verifier">${icone("check")}Vérifier le contenu</button>` : ""}
+          <button data-action="sortir" class="danger">${icone("archive")}Sortir de l'inventaire</button>
         </div></div>
       <button class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button>
     </div>
-    <div class="f-chemin">${icone("map-pin")}${anc.length
+    ${anc.length || !e.mobile ? `<div class="f-chemin">${icone("map-pin")}${anc.length
       ? anc.map(a => `<button data-vers="${a.id}">${echapper(a.nom)}</button>`).join(`<span class="sep">›</span>`)
-      : `<span>Tout en haut</span>`}</div>
+      : `<span>Tout en haut</span>`}</div>` : ""}
+    ${e.quantite != null ? `<div class="f-qte${e.quantite === 0 ? " epuise" : ""}"><span class="h4">Quantité</span>
+      <button class="btn-icone petit" data-action="qte-moins" aria-label="Moins">${icone("minus")}</button><b>${e.quantite}</b>
+      <button class="btn-icone petit" data-action="qte-plus" aria-label="Plus">${icone("plus")}</button>${e.quantite === 0 ? `<span class="f-type">épuisé</span>` : ""}</div>` : ""}
     ${e.note ? `<p class="f-note">${echapper(e.note)}</p>` : ""}
     ${e.tags.length ? `<div class="f-tags">${e.tags.map(t => `<button class="puce" data-tag="${echapper(t)}">${echapper(t)}</button>`).join("")}</div>` : ""}
     ${kids.length ? `<div class="f-contenu"><span class="h4">Contient</span> ${echapper(kids.map(k => k.nom).join(", "))}</div>` : ""}
+    ${achatHTML(e.achat)}
     <div class="f-actions">
-      <button class="btn plein" data-action="deplacer">${icone("transfer")}Déplacer</button>
-      <button class="btn" data-action="ouvrir">${icone(cont ? "chevron-right" : "map-pin")}${cont ? "Ouvrir" : "Voir l'endroit"}</button>
+      ${e.etat === "introuvable" ? `<button class="btn plein" data-action="retrouve">${icone("check")}Retrouvé</button>` : ""}
+      <button class="btn${e.etat === "introuvable" ? "" : " plein"}" data-action="deplacer">${icone("transfer")}${e.etat === "aranger" || (!e.parent && e.type === "objet") ? "Ranger" : "Déplacer"}</button>
+      ${cont || anc.length ? `<button class="btn" data-action="ouvrir">${icone(cont ? "chevron-right" : "map-pin")}${cont ? "Ouvrir" : "Voir l'endroit"}</button>` : ""}
     </div>
     ${e.historique.length ? `<details class="f-histo"><summary>${icone("history")}Anciens endroits</summary>
       ${[...e.historique].reverse().map(h => `<div class="h-ligne"><span>${echapper(h.de || "Tout en haut")}</span><span class="date">${dateCourte(h.le)}</span></div>`).join("")}
     </details>` : ""}`, "fiche", id);
+}
+
+// Bloc « Achat » de la fiche : date, prix, garantie (avec badge), facture
+const euros = p => p.toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+const dateIso = s => s ? dateCourte(new Date(s + "T12:00").getTime()) : "";
+function achatHTML(a) {
+  if (!a) return "";
+  const lignes = [];
+  if (a.date || a.prix != null) lignes.push(`<span>${[a.date ? "Acheté le " + dateIso(a.date) : "", a.prix != null ? euros(a.prix) : ""].filter(Boolean).join(" · ")}</span>`);
+  if (a.garantie) {
+    const ok = new Date(a.garantie + "T23:59") >= new Date();
+    lignes.push(`<span>Garantie jusqu'au ${dateIso(a.garantie)} <span class="badge ${ok ? "ok" : "fini"}">${ok ? "sous garantie" : "finie"}</span></span>`);
+  }
+  return `<div class="f-achat">${lignes.join("")}${a.facture ? `<button class="f-facture" data-action="facture">${icone("photo")}Facture</button>` : ""}</div>`;
+}
+function voirImage(src) {
+  const v = document.createElement("div");
+  v.className = "visionneuse";
+  v.innerHTML = `<img src="${src}" alt="">`;
+  v.addEventListener("click", () => v.remove());
+  document.body.appendChild(v);
 }
 
 // --- Formulaire (ajouter / modifier) ---
@@ -560,7 +677,9 @@ function ouvrirFormulaire(e, parent, typeImpose) {
   const neuf = !e;
   const parentEl = elements.get(neuf ? parent : e.parent);
   form = { id: e?.id, parent: neuf ? (parentEl ? parentEl.id : "") : e.parent,
-    type: neuf ? (typeImpose || TYPE_PROPOSE[parentEl ? parentEl.type : ""]) : e.type, photo: e?.photo || "" };
+    type: neuf ? (typeImpose || TYPE_PROPOSE[parentEl ? parentEl.type : ""]) : e.type, photo: e?.photo || "",
+    etat: e?.etat || "", mobile: !!e?.mobile, facture: e?.achat?.facture || "" };
+  const a = e?.achat || {};
   ouvrirVoile(`<form id="form" autocomplete="off">
     <div class="f-tete"><h2>${neuf ? "Ajouter" : "Modifier"}</h2>
       <button type="button" class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button></div>
@@ -571,19 +690,40 @@ function ouvrirFormulaire(e, parent, typeImpose) {
     <textarea id="f-note" class="champ" rows="2" placeholder="Note">${echapper(e?.note || "")}</textarea>
     <input id="f-tags" class="champ" placeholder="Tags, séparés par des virgules" value="${echapper((e?.tags || []).join(", "))}">
     <div class="suggestions" id="f-sugg"></div>
+    <div class="f-etats">
+      <button type="button" class="filtre p-aranger" data-etat="aranger" aria-pressed="${form.etat === "aranger"}">À ranger</button>
+      <button type="button" class="filtre p-mobile" data-etat="mobile" aria-pressed="${form.mobile}">Mobile</button>
+      <button type="button" class="filtre p-introuvable" data-etat="introuvable" aria-pressed="${form.etat === "introuvable"}">Introuvable</button>
+      <label class="f-qte-champ">Quantité <input id="f-qte" type="number" inputmode="numeric" min="0" value="${e?.quantite ?? ""}"></label>
+    </div>
+    <details class="f-achat-form"${e?.achat ? " open" : ""}><summary>${icone("tag")}Achat et garantie</summary>
+      <div class="f-grille">
+        <label>Acheté le<input id="f-date" type="date" class="champ" value="${a.date || ""}"></label>
+        <label>Prix (€)<input id="f-prix" type="text" inputmode="decimal" class="champ" value="${a.prix != null ? String(a.prix).replace(".", ",") : ""}"></label>
+        <label>Garantie jusqu'au<input id="f-garantie" type="date" class="champ" value="${a.garantie || ""}"></label>
+        <div class="f-ans"><button type="button" class="puce" data-ans="1">+1 an</button><button type="button" class="puce" data-ans="2">+2 ans</button></div>
+      </div>
+      <div class="photo-zone" id="f-facture"></div>
+    </details>
     <div class="f-actions">
       ${neuf ? `<button type="button" class="btn" data-action="enreg-autre">${icone("plus")}Autre</button>` : ""}
       <button type="submit" class="btn plein">${icone("check")}Enregistrer</button>
     </div>
     <input type="file" id="f-fichier" accept="image/*" hidden>
+    <input type="file" id="f-fichier-facture" accept="image/*" hidden>
   </form>`, "form");
-  majPhotoForm(); majSuggestions();
+  majPhotoForm(); majSuggestions(); majFactureForm();
   if (neuf) $("f-nom").focus();
 }
 function majPhotoForm() {
   $("f-photo").innerHTML = form.photo
     ? `<img src="${form.photo}" alt=""><button type="button" class="btn" data-action="photo">${icone("camera")}Changer</button><button type="button" class="btn danger" data-action="retirer-photo">${icone("trash")}</button>`
     : `<button type="button" class="btn" data-action="photo">${icone("camera")}Photo</button>`;
+}
+function majFactureForm() {
+  $("f-facture").innerHTML = form.facture
+    ? `<img src="${form.facture}" alt=""><button type="button" class="btn" data-action="facture-photo">${icone("camera")}Changer</button><button type="button" class="btn danger" data-action="retirer-facture">${icone("trash")}</button>`
+    : `<button type="button" class="btn" data-action="facture-photo">${icone("camera")}Photo de la facture</button>`;
 }
 function majSuggestions() {
   const deja = new Set($("f-tags").value.split(",").map(t => simplifier(t)).filter(Boolean));
@@ -596,7 +736,13 @@ function enregistrerFormulaire(autre) {
   const tags = [...new Set($("f-tags").value.split(",").map(t => t.trim()).filter(Boolean))];
   const base = form.id ? elements.get(form.id) : { id: nouvelId(), parent: form.parent, historique: [], cree: Date.now() };
   if (!base) { retour(); return; }
-  ecrire([{ ...base, nom, type: form.type, note: $("f-note").value.trim(), tags, photo: form.photo }]);
+  // Objet tapé sans endroit (ni mobile) : il tombe tout seul dans « À ranger »
+  let etat = form.etat;
+  if (!form.id && !base.parent && form.type === "objet" && !form.mobile && !etat) etat = "aranger";
+  const q = $("f-qte").value.trim();
+  const achat = normaliserAchat({ date: $("f-date").value, garantie: $("f-garantie").value, prix: $("f-prix").value.replace(",", ".").trim() || null, facture: form.facture });
+  ecrire([normaliser(base.id, { ...base, nom, type: form.type, note: $("f-note").value.trim(), tags, photo: form.photo,
+    etat, mobile: form.mobile, quantite: q === "" ? null : q, achat })]);
   if (autre) {   // saisie à la chaîne : même endroit, même type
     afficherToast(`Ajouté : ${nom}`, null);
     ouvrirFormulaire(null, form.parent, form.type);
@@ -604,16 +750,16 @@ function enregistrerFormulaire(autre) {
 }
 
 // Photo réduite (≈ 480 px, < 60 Ko) : juste pour reconnaître l'objet, et léger à synchroniser
-async function reduirePhoto(fichier) {
+async function reduirePhoto(fichier, taille0 = 480, limite = 80000) {
   const bmp = await createImageBitmap(fichier, { imageOrientation: "from-image" });
-  let taille = 480, qualite = 0.7, resultat = "";
+  let taille = taille0, qualite = 0.7, resultat = "";
   for (let essai = 0; essai < 6; essai++) {
     const r = Math.min(1, taille / Math.max(bmp.width, bmp.height));
     const c = document.createElement("canvas");
     c.width = Math.round(bmp.width * r); c.height = Math.round(bmp.height * r);
     c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
     resultat = c.toDataURL("image/jpeg", qualite);
-    if (resultat.length < 80000) break;
+    if (resultat.length < limite) break;
     taille *= 0.8; qualite = Math.max(0.5, qualite - 0.06);
   }
   bmp.close?.();
@@ -646,7 +792,7 @@ function remplirDeplacer(e) {
   let html = "";
   if (q) {
     const mots = q.split(/\s+/);
-    const res = [...elements.values()].filter(x => !interdits.has(x.id) && mots.every(m => simplifier(x.nom + " " + cheminTexte(x)).includes(m))).sort(triNom);
+    const res = [...elements.values()].filter(x => !x.archive && !interdits.has(x.id) && mots.every(m => simplifier(x.nom + " " + cheminTexte(x)).includes(m))).sort(triNom);
     html = res.slice(0, 200).map(x => ligne(x, -1)).join("") || `<p class="vide">Rien trouvé</p>`;
   } else {
     const rec = lireRecents().map(i => elements.get(i)).filter(x => x && !interdits.has(x.id) && x.id !== e.parent);
@@ -691,9 +837,10 @@ $("toast-annuler").addEventListener("click", () => { if (actionAnnuler) actionAn
 function deplacer(id, versId) {
   const e = elements.get(id);
   if (!e || e.parent === versId || versId === id || descendants(id).includes(versId)) return;
-  const avant = { parent: e.parent, historique: e.historique };
+  const avant = { parent: e.parent, historique: e.historique, etat: e.etat };
   const dest = elements.get(versId);
-  ecrire([{ ...e, parent: versId, historique: [...e.historique, { de: cheminTexte(e), le: Date.now() }].slice(-MAX_HISTO) }]);
+  // Rangé quelque part = plus « à ranger » ni « introuvable »
+  ecrire([{ ...e, parent: versId, etat: versId ? "" : e.etat, historique: [...e.historique, { de: cheminTexte(e), le: Date.now() }].slice(-MAX_HISTO) }]);
   if (versId) noterRecent(versId);
   afficherToast(`${e.nom} → ${dest ? dest.nom : "Tout en haut"}`, () => {
     const now = elements.get(id);
@@ -711,6 +858,77 @@ function supprimer(id) {
   afficherToast(ids.length > 1 ? `${e.nom} et son contenu supprimés` : `${e.nom} supprimé`, () => ecrire(copies));
 }
 
+// --- Sortir de l'inventaire (archive) ---
+function ouvrirSortir(id) {
+  const e = elements.get(id);
+  if (!e) { fermerVoile(); return; }
+  const n = descendants(id).length;
+  ouvrirVoile(`<div class="f-tete"><h2>Sortir « ${echapper(e.nom)} »</h2><button class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button></div>
+    ${n ? `<p class="f-type">avec son contenu (${n})</p>` : ""}
+    <div class="raisons">${Object.entries(RAISONS).map(([k, r]) => `<button class="btn" data-raison="${k}">${r}</button>`).join("")}</div>
+    <button class="lien-danger" data-action="supprimer">Supprimer pour de bon</button>`, "sortir", id);
+}
+function archiver(id, raison) {
+  const e = elements.get(id);
+  if (!e) return;
+  const ids = [id, ...descendants(id)], le = Date.now();
+  const copies = ids.map(i => elements.get(i));
+  retour();
+  ecrire(copies.map(x => ({ ...x, archive: { raison, le, de: cheminTexte(x), avec: x.id === id ? "" : id } })));
+  afficherToast(`${e.nom} → Archive (${RAISONS[raison]})`, () => ecrire(copies));
+}
+const groupeArchive = id => [...elements.values()].filter(x => x.id === id || x.archive?.avec === id);
+function restaurer(id) {
+  const g = groupeArchive(id), e = elements.get(id);
+  if (!e) return;
+  // L'ancien contenant a disparu ou est archivé : tout en haut, « à ranger »
+  const parentOk = elements.has(e.parent) && !elements.get(e.parent).archive;
+  ecrire(g.map(x => x.id === id ? { ...x, archive: null, parent: parentOk ? x.parent : "", etat: parentOk ? x.etat : "aranger" } : { ...x, archive: null }));
+  afficherToast(`${e.nom} restauré`, null);
+  afficherArchive();
+}
+function supprimerDefinitif(id) {
+  const g = groupeArchive(id), e = elements.get(id);
+  if (!e || !confirm(`Supprimer « ${e.nom} »${g.length > 1 ? ` et son contenu (${g.length - 1})` : ""} pour de bon ? Impossible de revenir en arrière.`)) return;
+  effacer(g.map(x => x.id));
+  afficherArchive();
+}
+function afficherArchive() {
+  const q = simplifier($("archive-cherche").value);
+  const l = [...elements.values()].filter(e => e.archive && !e.archive.avec && (!q || simplifier(e.nom + " " + e.archive.de).includes(q)))
+    .sort((a, b) => b.archive.le - a.archive.le);
+  $("liste-archive").innerHTML = l.length ? l.map(e => {
+    const n = groupeArchive(e.id).length - 1;
+    return `<details class="a-ligne"><summary>${vignette(e)}<span class="l-txt"><span class="l-nom">${echapper(e.nom)}${n ? ` <span class="qte">+${n}</span>` : ""}</span>
+      <span class="l-sous">${RAISONS[e.archive.raison]} · ${dateCourte(e.archive.le)}${e.archive.de ? " · " + echapper(e.archive.de) : ""}</span></span></summary>
+      <div class="a-actions"><button class="btn" data-restaurer="${e.id}">${icone("undo")}Restaurer</button>
+        <button class="btn danger" data-supprimer-def="${e.id}">${icone("trash")}Supprimer</button></div></details>`;
+  }).join("") : `<p class="vide">Vide</p>`;
+}
+
+// --- Vérifier le contenu (mode inventaire) : pas coché = introuvable ---
+function ouvrirVerifier(id) {
+  const e = elements.get(id), kids = enfants(id);
+  if (!e || !kids.length) { fermerVoile(); return; }
+  ouvrirVoile(`<div class="f-tete"><h2>Vérifier « ${echapper(e.nom)} »</h2><button class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button></div>
+    <div class="v-liste">${kids.map(k => `<label class="v-ligne"><input type="checkbox" data-verif="${k.id}"${k.etat === "introuvable" ? "" : " checked"}>
+      ${vignette(k)}<span class="l-nom"><span class="l-n">${echapper(k.nom)}</span>${qteHTML(k)}</span></label>`).join("")}</div>
+    <div class="f-actions"><button class="btn" data-action="verif-tout">Tout cocher</button><button class="btn plein" data-action="verif-fini">${icone("check")}Terminé</button></div>`, "verifier", id);
+}
+function finirVerifier() {
+  const changes = [];
+  document.querySelectorAll("[data-verif]").forEach(c => {
+    const k = elements.get(c.dataset.verif);
+    if (!k) return;
+    if (!c.checked && k.etat !== "introuvable") changes.push({ ...k, etat: "introuvable" });
+    if (c.checked && k.etat === "introuvable") changes.push({ ...k, etat: "" });
+  });
+  const manquants = [...document.querySelectorAll("[data-verif]")].filter(c => !c.checked).length;
+  if (changes.length) ecrire(changes);
+  retour();
+  afficherToast(manquants ? `${manquants} introuvable${manquants > 1 ? "s" : ""}` : "Tout est là", null);
+}
+
 let minuteurNomCase = null;
 let ignorerClic = false;   // juste après un glisser, le « clic » du lâcher ne doit rien ouvrir
 document.addEventListener("click", ev => {
@@ -721,7 +939,9 @@ document.addEventListener("click", ev => {
   if ((b = el("[data-aller]"))) { const a = b.dataset.aller; a === "accueil" ? remplacer("") : (MODALES.includes(a) && MODALES.includes(location.hash.slice(1)) ? remplacer(a) : aller(a)); return; }
   if ((b = el("[data-theme-choix]"))) { changerReglage("theme", b.dataset.themeChoix); window.appliquerTheme(b.dataset.themeChoix); afficherTheme(); return; }
   if ((b = el("[data-anim-choix]"))) { changerReglage("animations", b.dataset.animChoix); document.documentElement.dataset.anim = b.dataset.animChoix; afficherReglages(); return; }
-  if (t === $("ecran-reglages") || t === $("ecran-theme")) { remplacer(""); return; }
+  if (t === $("ecran-reglages") || t === $("ecran-theme") || t === $("ecran-archive")) { remplacer(""); return; }
+  if ((b = el("[data-restaurer]"))) { restaurer(b.dataset.restaurer); return; }
+  if ((b = el("[data-supprimer-def]"))) { supprimerDefinitif(b.dataset.supprimerDef); return; }
 
   // Voile : toucher le fond sombre ferme
   if (t === $("voile")) { retour(); return; }
@@ -734,6 +954,18 @@ document.addEventListener("click", ev => {
       else if (a === "menu") menu.hidden = !menu.hidden;
       else if (a === "modifier") remplacer("modifier=" + voileId);
       else if (a === "supprimer") supprimer(voileId);
+      else if (a === "sortir") remplacer("sortir=" + voileId);
+      else if (a === "verifier") remplacer("verifier=" + voileId);
+      else if (a === "verif-tout") $("voile").querySelectorAll("[data-verif]").forEach(c => { c.checked = true; });
+      else if (a === "verif-fini") finirVerifier();
+      else if (a === "retrouve") { const e = elements.get(voileId); ecrire([{ ...e, etat: "" }]); afficherToast(`${e.nom} retrouvé`, null); }
+      else if (a === "qte-plus" || a === "qte-moins") {
+        const e = elements.get(voileId);
+        ecrire([{ ...e, quantite: Math.max(0, e.quantite + (a === "qte-plus" ? 1 : -1)) }]);
+      }
+      else if (a === "facture") voirImage(elements.get(voileId).achat.facture);
+      else if (a === "facture-photo") $("f-fichier-facture").click();
+      else if (a === "retirer-facture") { form.facture = ""; majFactureForm(); }
       else if (a === "deplacer") remplacer("deplacer=" + voileId);
       else if (a === "ouvrir") {
         const e = elements.get(voileId);
@@ -753,6 +985,20 @@ document.addEventListener("click", ev => {
       return;
     }
     if ((b = el("[data-modele]"))) { appliquerModele(b.dataset.modele); return; }
+    if ((b = el("[data-raison]"))) { archiver(voileId, b.dataset.raison); return; }
+    if ((b = el("[data-etat]"))) {
+      const k = b.dataset.etat;
+      if (k === "mobile") { form.mobile = !form.mobile; if (form.mobile && form.etat === "aranger") form.etat = ""; }
+      else { form.etat = form.etat === k ? "" : k; if (k === "aranger") form.mobile = false; }
+      $("voile").querySelectorAll("[data-etat]").forEach(x => x.setAttribute("aria-pressed", x.dataset.etat === "mobile" ? form.mobile : x.dataset.etat === form.etat));
+      return;
+    }
+    if ((b = el("[data-ans]"))) {   // garantie = date d'achat (ou aujourd'hui) + 1 ou 2 ans
+      const d = $("f-date").value ? new Date($("f-date").value + "T12:00") : new Date();
+      d.setFullYear(d.getFullYear() + +b.dataset.ans);
+      $("f-garantie").value = d.toISOString().slice(0, 10);
+      return;
+    }
     if (voileType === "case" && (b = el("[data-genre], [data-haut], [data-larg]"))) {
       const { ci, ki } = form;
       majFacade(cols => {
@@ -777,6 +1023,7 @@ document.addEventListener("click", ev => {
   }
 
   // Accueil
+  if ((b = el("[data-filtre]"))) { filtre = filtre === b.dataset.filtre ? "" : b.dataset.filtre; afficherAccueil(); return; }
   if ((b = el("[data-dans]"))) { $("recherche").value = ""; b.dataset.dans ? aller("dans=" + b.dataset.dans) : remplacer(""); return; }
   if ((b = el("[data-fiche]"))) { aller("fiche=" + b.dataset.fiche); return; }
   if ((b = el("[data-plan-edit]"))) { aller("plan=" + b.dataset.planEdit); return; }
@@ -824,6 +1071,7 @@ document.addEventListener("click", ev => {
 document.addEventListener("submit", ev => { ev.preventDefault(); if (ev.target.id === "form") enregistrerFormulaire(false); });
 document.addEventListener("input", ev => {
   if (ev.target.id === "recherche") afficherAccueil();
+  else if (ev.target.id === "archive-cherche") afficherArchive();
   else if (ev.target.id === "f-tags") majSuggestions();
   else if (ev.target.id === "c-nom") {   // nom d'une case : enregistré après une petite pause
     clearTimeout(minuteurNomCase);
@@ -832,9 +1080,13 @@ document.addEventListener("input", ev => {
   }
 });
 document.addEventListener("change", async ev => {
-  if (ev.target.id !== "f-fichier" || !ev.target.files[0]) return;
-  try { form.photo = await reduirePhoto(ev.target.files[0]); majPhotoForm(); }
-  catch (e) { afficherToast("Photo illisible", null); }
+  const id = ev.target.id, f = ev.target.files?.[0];
+  if (!f || (id !== "f-fichier" && id !== "f-fichier-facture")) return;
+  try {
+    // Facture : plus grande, pour pouvoir lire le texte
+    if (id === "f-fichier") { form.photo = await reduirePhoto(f); majPhotoForm(); }
+    else { form.facture = await reduirePhoto(f, 1100, 200000); majFactureForm(); }
+  } catch (e) { afficherToast("Photo illisible", null); }
 });
 $("effacer-recherche").addEventListener("click", () => { $("recherche").value = ""; afficherAccueil(); $("recherche").focus(); });
 document.addEventListener("keydown", ev => {
@@ -941,22 +1193,44 @@ const COLONNES = [
   { header: "", key: "_photo", width: 5 },
   { header: "Nom", key: "nom", width: 30 },
   { header: "Type", key: "type", width: 9 },
+  { header: "Quantité", key: "quantite", width: 9, centre: true },
+  { header: "État", key: "etat", width: 11 },
+  { header: "Mobile", key: "mobile", width: 8, centre: true },
   { header: "Emplacement", key: "chemin", width: 38 },
   { header: "Tags", key: "tags", width: 18 },
   { header: "Note", key: "note", width: 30 },
+  { header: "Acheté le", key: "achete", width: 11 },
+  { header: "Garantie", key: "garantie", width: 11 },
+  { header: "Prix", key: "prix", width: 9 },
   { header: "Déplacé le", key: "deplace", width: 12 },
   { header: "ID", key: "id", width: 12 },
   { header: "Dans (ID)", key: "parent", width: 12 }
 ];
+const COLONNES_ARCHIVE = [
+  ...COLONNES.slice(0, 4),
+  { header: "Raison", key: "raison", width: 9 },
+  { header: "Sorti le", key: "sorti", width: 11 },
+  { header: "Ancien endroit", key: "de", width: 38 },
+  ...COLONNES.slice(7, 12),
+  { header: "ID", key: "id", width: 12 },
+  { header: "Dans (ID)", key: "parent", width: 12 },
+  { header: "Avec (ID)", key: "avec", width: 12 }
+];
+const iso = ms => new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+function ligneXL(e) {
+  const der = e.historique[e.historique.length - 1];
+  return { nom: e.nom, type: TYPES[e.type].nom, quantite: e.quantite ?? "", etat: ETATS[e.etat] || "", mobile: e.mobile ? "Oui" : "",
+    chemin: cheminTexte(e), tags: e.tags.join(", "), note: e.note, achete: e.achat?.date || "", garantie: e.achat?.garantie || "",
+    prix: e.achat?.prix ?? "", deplace: der ? dateCourte(der.le) : "", id: e.id, parent: e.parent, _image: e.photo || undefined,
+    raison: e.archive ? RAISONS[e.archive.raison] : "", sorti: e.archive ? iso(e.archive.le) : "", de: e.archive?.de || "", avec: e.archive?.avec || "" };
+}
 $("btn-export").addEventListener("click", async () => {
   try {
     const ExcelJS = await chargerExcelJS();
     const wb = new ExcelJS.Workbook();
     const lignes = [], profs = [];
     const parcourir = (pid, prof) => enfants(pid).forEach(e => {
-      const der = e.historique[e.historique.length - 1];
-      lignes.push({ nom: e.nom, type: TYPES[e.type].nom, chemin: cheminTexte(e), tags: e.tags.join(", "), note: e.note,
-        deplace: der ? dateCourte(der.le) : "", id: e.id, parent: e.parent, _image: e.photo || undefined });
+      lignes.push(ligneXL(e));
       profs.push({ prof, gras: estContenant(e) });
       parcourir(e.id, prof + 1);
     });
@@ -967,6 +1241,10 @@ $("btn-export").addEventListener("click", async () => {
       c.alignment = { ...c.alignment, indent: Math.min(p.prof, 15) };
       if (p.gras) c.font = { bold: true };
     });
+    // Archive : ce qui est sorti de l'inventaire, le plus récent d'abord (contenu juste sous son contenant)
+    const sortis = [...elements.values()].filter(e => e.archive && !e.archive.avec).sort((a, b) => b.archive.le - a.archive.le)
+      .flatMap(e => [e, ...[...elements.values()].filter(x => x.archive?.avec === e.id)]);
+    if (sortis.length) ajouterFeuille(wb, "Archive", COLONNES_ARCHIVE, sortis.map(ligneXL), { hauteur: 21, figer: 2 });
     // Plans : un onglet à part, le plan en texte (JSON) pour pouvoir le réimporter tel quel
     const plans = [...elements.values()].filter(e => !planVide(e.plan) || e.facade);
     if (plans.length) ajouterFeuille(wb, "Plans", [
@@ -984,8 +1262,6 @@ $("fichier-import").addEventListener("change", async ev => {
   if (!f) return;
   try {
     const wb = await lireClasseur(f);
-    const ws = wb.getWorksheet("Inventaire") || wb.worksheets[0];
-    const images = imagesParLigne(wb, ws);
     const plans = new Map();
     const facades = new Map();
     const lireJSON = c => { try { const t = String(c.text || "").trim(); return t ? JSON.parse(t) : null; } catch (e) { return null; } };   // illisible : ignoré
@@ -995,19 +1271,31 @@ $("fichier-import").addEventListener("change", async ev => {
       plans.set(id, lireJSON(rang.getCell(3)));
       facades.set(id, lireJSON(rang.getCell(4)));
     });
-    const cols = {};
-    ws.getRow(1).eachCell((c, i) => { cols[simplifier(c.text)] = i; });
-    const lire = (rang, nom) => cols[nom] ? String(rang.getCell(cols[nom]).text ?? "").trim() : "";
     const typeDe = t => ORDRE_TYPES.find(k => simplifier(TYPES[k].nom) === simplifier(t) || k === simplifier(t)) || "objet";
+    const cleDe = (table, t) => Object.keys(table).find(k => simplifier(table[k]) === simplifier(t) || k === simplifier(t)) || "";
+    // Lit une feuille (Inventaire ou Archive) : colonnes reconnues par leur titre
     const lus = [];
-    ws.eachRow((rang, n) => {
-      if (n === 1) return;
-      const nom = lire(rang, "nom");
-      if (!nom) return;
-      lus.push({ id: lire(rang, "id") || nouvelId(), nom, type: typeDe(lire(rang, "type")), parentId: lire(rang, "dans (id)"),
-        chemin: lire(rang, "emplacement"), tags: lire(rang, "tags").split(",").map(t => t.trim()).filter(Boolean),
-        note: lire(rang, "note"), photo: images.get(n) || "" });
-    });
+    const lireOnglet = (ws, archive) => {
+      if (!ws) return;
+      const images = imagesParLigne(wb, ws), cols = {};
+      ws.getRow(1).eachCell((c, i) => { cols[simplifier(c.text)] = i; });
+      const lire = (rang, nom) => cols[nom] ? String(rang.getCell(cols[nom]).text ?? "").trim() : "";
+      ws.eachRow((rang, n) => {
+        if (n === 1) return;
+        const nom = lire(rang, "nom");
+        if (!nom) return;
+        const sorti = Date.parse(lire(rang, "sorti le"));
+        lus.push({ id: lire(rang, "id") || nouvelId(), nom, type: typeDe(lire(rang, "type")), parentId: lire(rang, "dans (id)"),
+          chemin: archive ? "" : lire(rang, "emplacement"), tags: lire(rang, "tags").split(",").map(t => t.trim()).filter(Boolean),
+          note: lire(rang, "note"), photo: images.get(n) || "", quantite: lire(rang, "quantite"), etat: cleDe(ETATS, lire(rang, "etat")),
+          mobile: /^(oui|x|1|vrai)$/i.test(lire(rang, "mobile")),
+          achat: { date: lire(rang, "achete le"), garantie: lire(rang, "garantie"), prix: lire(rang, "prix").replace(",", ".") || null },
+          archive: archive ? { raison: cleDe(RAISONS, lire(rang, "raison")) || "autre", le: Number.isFinite(sorti) ? sorti : Date.now(),
+            de: lire(rang, "ancien endroit"), avec: lire(rang, "avec (id)") } : null });
+      });
+    };
+    lireOnglet(wb.getWorksheet("Inventaire") || wb.worksheets[0], false);
+    lireOnglet(wb.getWorksheet("Archive"), true);
     if (!lus.length) { afficherToast("Rien à importer", null); return; }
     // Sans « Dans (ID) » (fichier fait à la main) : on retrouve le parent par son chemin « A › B › C »
     const ids = new Set(lus.map(l => l.id));
@@ -1020,7 +1308,10 @@ $("fichier-import").addEventListener("change", async ev => {
     const anciens = [...elements.keys()].filter(id => !ids.has(id));
     const avant = new Map(elements);
     effacer(anciens);
-    ecrire(lus.map(l => normaliser(l.id, { ...l, parent: l.parentId, plan: plans.get(l.id), facade: facades.get(l.id), historique: avant.get(l.id)?.historique || [], cree: avant.get(l.id)?.cree || Date.now() })));
+    // Gardés depuis l'appli (pas dans le fichier) : historique, date de création, photo de facture
+    ecrire(lus.map(l => normaliser(l.id, { ...l, parent: l.parentId, plan: plans.get(l.id), facade: facades.get(l.id),
+      achat: { ...l.achat, facture: avant.get(l.id)?.achat?.facture || "" },
+      historique: avant.get(l.id)?.historique || [], cree: avant.get(l.id)?.cree || Date.now() })));
     afficherToast(`${lus.length} éléments importés`, null);
     remplacer("");
   } catch (err) { afficherToast("Import impossible : " + err.message, null); }

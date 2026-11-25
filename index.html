@@ -50,6 +50,7 @@
     <input id="recherche" type="search" placeholder="Rechercher" aria-label="Rechercher">
     <button class="btn-icone petit" id="effacer-recherche" aria-label="Effacer" hidden><svg class="ic"><use href="icones/icones.svg#x"></use></svg></button>
   </div>
+  <div id="filtres" class="filtres" hidden></div>
   <!-- Fil d'Ariane (Tout › Appart › Chambre) : on peut aussi y lâcher un objet glissé -->
   <nav id="fil" class="fil"></nav>
   <div id="courant" class="courant" hidden></div>
@@ -77,6 +78,7 @@
           <button data-anim-choix="simples">Simples</button>
         </div>
       </div>
+      <button class="reg" data-aller="archive"><span>Archive</span><span class="val"><svg class="ic"><use href="icones/icones.svg#chevron-right"></use></svg></span></button>
       <button class="reg" id="ouvrir-notes"><span>Notes</span><span class="val"><svg class="ic"><use href="icones/icones.svg#chevron-right"></use></svg></span></button>
     </div>
     <div class="sect">Excel</div>
@@ -98,6 +100,19 @@
       <button class="reg" data-theme-choix="clair"><span>Clair</span><span class="radio"></span></button>
       <button class="reg" data-theme-choix="sombre"><span>Sombre</span><span class="radio"></span></button>
     </div>
+  </div>
+</section>
+
+<!-- Archive : éléments sortis de l'inventaire (jetés, donnés…), restaurables -->
+<section id="ecran-archive" class="ecran modale" hidden>
+  <div class="fenetre-c" role="dialog" aria-label="Archive">
+    <button class="retour" data-aller="reglages">‹ Réglages</button>
+    <h2 class="titre">Archive</h2>
+    <div class="recherche archive-recherche">
+      <svg class="ic"><use href="icones/icones.svg#search"></use></svg>
+      <input id="archive-cherche" type="search" placeholder="Rechercher" aria-label="Rechercher dans l'archive">
+    </div>
+    <div id="liste-archive"></div>
   </div>
 </section>
 
