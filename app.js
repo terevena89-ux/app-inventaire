@@ -20,7 +20,7 @@ import { normaliserPlan, planVide, vueHTML, ouvrirEditeur, fermerEditeur, editeu
 
 // ---------- 1. Base et données ----------
 
-const VERSION = "v0.7.1";
+const VERSION = "v0.8.0";
 const NOM_APPLI = "app-inventaire";
 
 // Tout est un « élément » (lieu, pièce, meuble, boîte, objet) rangé dans un autre (parent).
@@ -36,7 +36,7 @@ const TYPES = {
   objet:  { nom: "Objet",  ic: "objet" }
 };
 const ORDRE_TYPES = Object.keys(TYPES);
-const TYPE_PROPOSE = { "": "lieu", lieu: "piece", piece: "meuble", meuble: "boite", case: "objet", boite: "objet", objet: "objet" };
+const TYPE_PROPOSE = { "": "lieu", lieu: "piece", piece: "meuble", meuble: "objet", case: "objet", boite: "objet", objet: "objet" };
 const MAX_HISTO = 20;
 
 let elements = new Map();     // id -> élément
@@ -611,11 +611,13 @@ const vignette = e => e.photo
 const pastillesHTML = e => (e.etat ? `<span class="pastille p-${e.etat}">${ETATS[e.etat]}</span>` : "")
   + (e.mobile ? `<span class="pastille p-mobile">Mobile</span>` : "");
 const qteHTML = e => e.quantite != null ? `<span class="qte">×${e.quantite}</span>` : "";
-function ligneHTML(e, avecChemin) {
+// avecChemin : résultat de recherche, l'emplacement complet est écrit en entier (sur 2 lignes s'il le faut).
+// niv : « Tout montrer », ligne décalée selon la profondeur, sans sous-titre (le contenu est affiché dessous).
+function ligneHTML(e, avecChemin, niv) {
   const kids = enfants(e.id), cont = estContenant(e);
-  const sous = avecChemin ? (cheminTexte(e) || (e.mobile ? "" : "Tout en haut")) : kids.map(k => k.nom).join(", ");
-  return `<div class="ligne${cont ? " contenant" : ""}${e.quantite === 0 ? " epuise" : ""}" data-id="${e.id}">${vignette(e)}
-    <div class="l-txt"><span class="l-nom"><span class="l-n">${echapper(e.nom)}</span>${qteHTML(e)}${pastillesHTML(e)}</span>${sous ? `<span class="l-sous">${echapper(sous)}</span>` : ""}</div>
+  const sous = niv != null ? "" : avecChemin ? (cheminTexte(e) || (e.mobile ? "" : "Tout en haut")) : kids.map(k => k.nom).join(", ");
+  return `<div class="ligne${cont ? " contenant" : ""}${e.quantite === 0 ? " epuise" : ""}${niv ? " arbre" : ""}" data-id="${e.id}"${niv ? ` style="--niv:${niv}"` : ""}>${vignette(e)}
+    <div class="l-txt"><span class="l-nom"><span class="l-n">${echapper(e.nom)}</span>${qteHTML(e)}${pastillesHTML(e)}</span>${sous ? `<span class="l-sous${avecChemin ? " chemin" : ""}">${avecChemin ? icone("map-pin") : ""}${echapper(sous)}</span>` : ""}</div>
     ${cont && !avecChemin ? icone("chevron-right") : ""}</div>`;
 }
 
@@ -631,6 +633,45 @@ function afficherFiltres(visible) {
 }
 
 let aSurligner = "";
+let toutMontrer = false;   // « Tout montrer » : reste actif d'un contenant à l'autre jusqu'à « Replier »
+
+// ---------- Ajout rapide (barre du bas) ----------
+// Pendant le rangement : taper un nom, Entrée, c'est rangé ici ; le clavier reste ouvert pour le suivant.
+// Le type est deviné d'après l'endroit (pièce dans un lieu, meuble dans une pièce, objet ailleurs) et se change à gauche.
+const ar = { dans: null, photo: "" };
+function majAjoutRapide(tete) {
+  $("ajout-rapide").hidden = false;
+  const id = tete ? tete.id : "";
+  if (ar.dans !== id) {   // nouvel endroit : type deviné à nouveau
+    ar.dans = id;
+    $("ar-type").innerHTML = ORDRE_TYPES.map(t => `<option value="${t}">${TYPES[t].nom}</option>`).join("");
+    $("ar-type").value = TYPE_PROPOSE[tete ? tete.type : ""];
+  }
+  majBarreAjout();
+}
+function majBarreAjout() {
+  const tete = elements.get(ar.dans), type = $("ar-type").value;
+  $("ar-nom").placeholder = type === "lieu" && !dansId ? "Ajouter un lieu"
+    : tete ? `Ajouter dans ${tete.nom}` : "Ajouter";
+  $("ar-photo").innerHTML = ar.photo ? `<img src="${ar.photo}" alt="">` : icone("camera");
+  $("ar-ok").hidden = !$("ar-nom").value.trim();
+}
+function ajouterRapide() {
+  const nom = $("ar-nom").value.trim();
+  if (!nom) return;
+  const type = $("ar-type").value;
+  // Un lieu tapé à l'accueil va tout en haut (pas dans le lieu principal)
+  const parent = type === "lieu" && !dansId ? "" : ar.dans || "";
+  const e = normaliser(nouvelId(), { nom, type, parent, photo: ar.photo, historique: [], cree: Date.now(),
+    etat: !parent && type === "objet" ? "aranger" : "" });
+  aSurligner = e.id;
+  ecrire([e]);
+  $("ar-nom").value = ""; ar.photo = "";
+  majBarreAjout();
+  vibrer("succes");
+  afficherToast(`Ajouté : ${nom}`, () => effacer([e.id]));
+}
+
 function afficherAccueil() {
   const q = $("recherche").value.trim();
   $("effacer-recherche").hidden = !q;
@@ -639,9 +680,12 @@ function afficherAccueil() {
   const autre = onglet === "objets" || (onglet === "escalier" && !q);
   $("vue-onglet").hidden = $("onglet-outils").hidden = !autre;
   $("liste").hidden = autre;
+  if (autre || q || filtre) $("ajout-rapide").hidden = true;
   if (autre) {
     ["fil", "courant", "plan", "facade", "filtres"].forEach(i => { $(i).hidden = true; });
     if (onglet === "objets") afficherObjets(q); else afficherEscalier();
+    // Titre avec flèche ← (ces listes s'ouvrent depuis le menu en haut)
+    $("onglet-outils").insertAdjacentHTML("afterbegin", `<div class="vue-titre"><button class="btn-icone" data-action="remonter" aria-label="Retour">${icone("arrow-left")}</button><b>${onglet === "objets" ? "Tous les objets" : "Escalier"}</b></div>`);
     return;
   }
   const cur0 = elements.get(dansId);
@@ -670,9 +714,14 @@ function afficherAccueil() {
   $("liste").dataset.depot = tete ? tete.id : "";
   const liste = enfants(tete ? tete.id : "");
   const autres = principal ? enfants("").filter(e => e.id !== principal.id) : [];
-  $("liste").innerHTML = (liste.length ? liste.map(e => ligneHTML(e, false)).join("")
-    : `<div class="vide">${tete ? "Vide" : ""}<br><button class="btn" data-action="ajouter-ici">${icone("plus")}${tete ? "Ajouter" : "Ajouter un lieu"}</button></div>`)
+  // « Tout montrer » : seulement s'il y a des boîtes (ou meubles…) qui contiennent quelque chose
+  const aDeplier = tete && liste.some(e => enfants(e.id).length);
+  const arbre = (id, niv) => enfants(id).flatMap(e => [ligneHTML(e, false, niv), ...arbre(e.id, niv + 1)]);
+  $("liste").innerHTML = (aDeplier ? `<button class="plus-details tout-montrer" data-action="tout-montrer" aria-expanded="${toutMontrer}"><span><span>${toutMontrer ? "Replier" : "Tout montrer"}</span>${icone("chevron-down")}</span></button>` : "")
+    + (liste.length ? (aDeplier && toutMontrer ? arbre(tete.id, 0).join("") : liste.map(e => ligneHTML(e, false)).join(""))
+      : `<div class="vide">${tete ? "Vide" : "Rien pour l'instant"}</div>`)
     + (autres.length ? `<div class="groupe-titre h4">Autres lieux</div>` + autres.map(e => ligneHTML(e, false)).join("") : "");
+  majAjoutRapide(tete);
   if (aSurligner) {
     const l = $("liste").querySelector(`[data-id="${aSurligner}"]`);
     if (l) { l.classList.add("eclair"); l.scrollIntoView({ block: "center" }); }
@@ -760,6 +809,8 @@ function afficherResultats(q) {
   $("liste").innerHTML = res.length ? res.slice(0, 300).map(e => ligneHTML(e, true)).join("") : `<p class="vide">Rien trouvé</p>`;
 }
 
+// « Plus de détails » (comme Foodix) : texte gris posé sur un trait ; ouvre le bloc .f-plus qui suit
+const plusDetailsHTML = ouvert => `<button type="button" class="plus-details" data-action="plus-details" aria-expanded="${ouvert}"><span><span>${ouvert ? "Moins de détails" : "Plus de détails"}</span>${icone("chevron-down")}</span></button>`;
 let sensQte = "";   // le chiffre de la quantité « roule » vers le haut ou le bas
 function ouvrirFiche(id) {
   const e = elements.get(id);
@@ -787,15 +838,16 @@ function ouvrirFiche(id) {
     ${e.note ? `<p class="f-note">${echapper(e.note)}</p>` : ""}
     ${e.tags.length ? `<div class="f-tags">${e.tags.map(t => `<button class="puce" data-tag="${echapper(t)}">${echapper(t)}</button>`).join("")}</div>` : ""}
     ${kids.length ? `<div class="f-contenu"><span class="h4">Contient</span> ${echapper(kids.map(k => k.nom).join(", "))}</div>` : ""}
-    ${achatHTML(e.achat)}
     <div class="f-actions">
       ${e.etat === "introuvable" ? `<button class="btn plein" data-action="retrouve">${icone("check")}Retrouvé</button>` : ""}
       <button class="btn${e.etat === "introuvable" ? "" : " plein"}" data-action="deplacer">${icone("transfer")}${e.etat === "aranger" || (!e.parent && e.type === "objet") ? "Ranger" : "Déplacer"}</button>
       ${cont || anc.length ? `<button class="btn" data-action="${cont ? "ouvrir" : "endroit"}">${icone(cont ? "chevron-right" : "map-pin")}${cont ? "Ouvrir" : "Voir l'endroit"}</button>` : ""}
     </div>
-    ${e.historique.length ? `<details class="f-histo"><summary>${icone("history")}Anciens endroits</summary>
-      ${[...e.historique].reverse().map(h => `<div class="h-ligne"><span>${echapper(h.de || "Tout en haut")}</span><span class="date">${dateCourte(h.le)}</span></div>`).join("")}
-    </details>` : ""}`, "fiche", id);
+    ${e.achat || e.historique.length ? `${plusDetailsHTML(false)}<div class="f-plus" hidden>
+      ${achatHTML(e.achat)}
+      ${e.historique.length ? `<div class="f-histo"><span class="h4">${icone("history")}Anciens endroits</span>
+        ${[...e.historique].reverse().map(h => `<div class="h-ligne"><span>${echapper(h.de || "Tout en haut")}</span><span class="date">${dateCourte(h.le)}</span></div>`).join("")}
+      </div>` : ""}</div>` : ""}`, "fiche", id);
   sensQte = "";
 }
 
@@ -835,13 +887,17 @@ function ouvrirFormulaire(e, parent, typeImpose) {
     type: neuf ? (typeImpose || TYPE_PROPOSE[parentEl ? parentEl.type : ""]) : e.type, photo: e?.photo || "",
     etat: e?.etat || "", mobile: !!e?.mobile, facture: e?.achat?.facture || "", couleur: e?.couleur || "" };
   const a = e?.achat || {};
+  // Détails (type, note, tags, couleur, pastilles, quantité, achat) repliés, sauf s'il y a déjà quelque chose dedans
+  const ouvert = !!e && !!(e.note || e.tags.length || e.couleur || e.etat || e.mobile || e.quantite != null || e.achat);
   ouvrirVoile(`<form id="form" autocomplete="off">
     <div class="f-tete"><h2>${neuf ? "Ajouter" : "Modifier"}</h2>
       <button type="button" class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button></div>
     <div class="f-ou">${icone("map-pin")}<span>${parentEl ? echapper(cheminComplet(parentEl)) : "Tout en haut"}</span></div>
     <input id="f-nom" class="champ" placeholder="Nom" maxlength="80" value="${echapper(e?.nom || "")}" enterkeyhint="done">
-    <div class="types">${ORDRE_TYPES.map(t => `<button type="button" data-type="${t}" aria-pressed="${t === form.type}">${icone(TYPES[t].ic)}${TYPES[t].nom}</button>`).join("")}</div>
     <div class="photo-zone" id="f-photo"></div>
+    ${plusDetailsHTML(ouvert)}
+    <div class="f-plus"${ouvert ? "" : " hidden"}>
+    <div class="types">${ORDRE_TYPES.map(t => `<button type="button" data-type="${t}" aria-pressed="${t === form.type}">${icone(TYPES[t].ic)}${TYPES[t].nom}</button>`).join("")}</div>
     <textarea id="f-note" class="champ" rows="2" placeholder="Note">${echapper(e?.note || "")}</textarea>
     <input id="f-tags" class="champ" placeholder="Tags, séparés par des virgules" value="${echapper((e?.tags || []).join(", "))}">
     <div class="suggestions" id="f-sugg"></div>
@@ -861,6 +917,7 @@ function ouvrirFormulaire(e, parent, typeImpose) {
       </div>
       <div class="photo-zone" id="f-facture"></div>
     </details>
+    </div>
     <div class="f-actions">
       ${neuf ? `<button type="button" class="btn" data-action="enreg-autre">${icone("plus")}Autre</button>` : ""}
       <button type="submit" class="btn plein">${icone("check")}Enregistrer</button>
@@ -1180,6 +1237,13 @@ document.addEventListener("click", ev => {
       const a = b.dataset.action;
       if (a === "fermer") retour();
       else if (a === "menu") menu.hidden = !menu.hidden;
+      else if (a === "plus-details") {
+        const bloc = $("voile").querySelector(".f-plus"), ouvre = bloc.hidden;
+        bloc.hidden = !ouvre;
+        b.setAttribute("aria-expanded", ouvre);
+        b.querySelector("span span").textContent = ouvre ? "Moins de détails" : "Plus de détails";
+        vibrer("tic");
+      }
       else if (a === "modifier") remplacer("modifier=" + voileId);
       else if (a === "supprimer") supprimer(voileId);
       else if (a === "sortir") remplacer("sortir=" + voileId);
@@ -1263,6 +1327,9 @@ document.addEventListener("click", ev => {
   }
 
   // Accueil
+  // Menu des listes (Tous les objets, Escalier) : s'ouvre avec le bouton en haut, se ferme au toucher suivant
+  if (t.closest("#btn-vues")) { $("menu-vues").hidden = !$("menu-vues").hidden; return; }
+  $("menu-vues").hidden = true;
   if ((b = el("[data-onglet]"))) {
     const k = b.dataset.onglet;
     if (k === onglet && k === "maison") { $("recherche").value = ""; remplacer(""); return; }   // 2e toucher sur Maison = retour à l'accueil
@@ -1320,8 +1387,8 @@ document.addEventListener("click", ev => {
     if (e) estContenant(e) ? aller("dans=" + e.id) : aller("fiche=" + e.id);
     return;
   }
-  if (el("[data-action='ajouter-ici']")) { aller("ajouter=" + ($("liste").dataset.depot || "")); return; }
-  if (t.closest("#btn-ajouter")) { aller("ajouter=" + ($("recherche").value.trim() || onglet !== "maison" ? "" : dansId)); return; }
+  if (el("[data-action='tout-montrer']")) { toutMontrer = !toutMontrer; vibrer("tic"); afficherAccueil(); return; }
+  if (t.closest("#ar-photo")) { $("ar-fichier").click(); return; }
   if ((b = el(".ligne"))) {
     const e = elements.get(b.dataset.id);
     if (!e) return;
@@ -1331,9 +1398,22 @@ document.addEventListener("click", ev => {
   }
 }, true);
 
-document.addEventListener("submit", ev => { ev.preventDefault(); if (ev.target.id === "form") enregistrerFormulaire(false); });
+document.addEventListener("submit", ev => {
+  ev.preventDefault();
+  if (ev.target.id === "form") enregistrerFormulaire(false);
+  else if (ev.target.id === "ajout-rapide") { ajouterRapide(); $("ar-nom").focus(); }
+});
+$("ar-type").addEventListener("change", majBarreAjout);
+$("ar-fichier").addEventListener("change", async ev => {
+  const f = ev.target.files?.[0];
+  ev.target.value = "";
+  if (!f) return;
+  try { ar.photo = await reduirePhoto(f); majBarreAjout(); $("ar-nom").focus(); }
+  catch (e) { afficherToast("Photo illisible", null); }
+});
 document.addEventListener("input", ev => {
-  if (ev.target.id === "recherche") afficherAccueil();
+  if (ev.target.id === "ar-nom") majBarreAjout();
+  else if (ev.target.id === "recherche") afficherAccueil();
   else if (ev.target.id === "archive-cherche") afficherArchive();
   else if (ev.target.id === "f-tags") majSuggestions();
   else if (ev.target.id === "c-nom") {   // nom d'une case : enregistré après une petite pause

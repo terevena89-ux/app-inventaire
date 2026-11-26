@@ -42,7 +42,11 @@
 <section id="ecran-accueil" class="ecran" hidden>
   <header class="barre">
     <h1 class="logo">Inventaire</h1>
-    <button class="btn-icone" id="btn-ajouter" aria-label="Ajouter"><svg class="ic"><use href="icones/icones.svg#plus"></use></svg></button>
+    <div class="menu-wrap"><button class="btn-icone" id="btn-vues" aria-label="Listes"><svg class="ic"><use href="icones/icones.svg#objets"></use></svg></button>
+      <div class="menu" id="menu-vues" hidden>
+        <button data-onglet="objets"><svg class="ic"><use href="icones/icones.svg#objets"></use></svg>Tous les objets</button>
+        <button data-onglet="escalier"><svg class="ic"><use href="icones/icones.svg#escalier"></use></svg>Escalier (tout l'arbre)</button>
+      </div></div>
     <button class="btn-icone" data-aller="reglages" aria-label="Réglages"><svg class="ic"><use href="icones/icones.svg#settings"></use></svg></button>
   </header>
   <div class="recherche">
@@ -60,11 +64,14 @@
   <!-- Onglets Objets / Escalier : réglages du classement + liste -->
   <div id="onglet-outils" class="onglet-outils" hidden></div>
   <div id="vue-onglet" class="liste" hidden></div>
-  <nav id="onglets" class="onglets" aria-label="Onglets">
-    <button data-onglet="maison"><svg class="ic"><use href="icones/icones.svg#home"></use></svg>Maison</button>
-    <button data-onglet="objets"><svg class="ic"><use href="icones/icones.svg#objets"></use></svg>Objets</button>
-    <button data-onglet="escalier"><svg class="ic"><use href="icones/icones.svg#escalier"></use></svg>Escalier</button>
-  </nav>
+  <!-- Ajout rapide : on tape un nom, Entrée, c'est rangé ici -->
+  <form id="ajout-rapide" class="ajout-rapide" autocomplete="off" hidden>
+    <select id="ar-type" aria-label="Type"></select>
+    <input id="ar-nom" maxlength="80" enterkeyhint="send" placeholder="Ajouter ici" aria-label="Nom">
+    <button type="button" class="btn-icone" id="ar-photo" aria-label="Photo"><svg class="ic"><use href="icones/icones.svg#camera"></use></svg></button>
+    <button type="submit" class="btn-icone ar-ok" id="ar-ok" aria-label="Ajouter" hidden><svg class="ic"><use href="icones/icones.svg#plus"></use></svg></button>
+    <input type="file" id="ar-fichier" accept="image/*" hidden>
+  </form>
 </section>
 
 <section id="ecran-reglages" class="ecran modale" hidden>

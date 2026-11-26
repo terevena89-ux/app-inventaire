@@ -1,5 +1,14 @@
 # Inventaire — journal des nouveautés
 
+## 0.8.0 — 2026-11-26
+Plus simple au quotidien : noter vite, retrouver, regarder.
+- Barre « Ajouter dans … » en bas de l'écran : taper un nom, Entrée, c'est rangé ici ; le clavier reste ouvert pour le suivant. Type deviné (pièce, meuble, objet…), changeable à gauche ; bouton photo ; « Annuler » juste après.
+- Formulaire réduit à Nom + Photo ; le reste (type, note, tags, couleur, pastilles, quantité, achat et garantie) sous « Plus de détails », ouvert tout seul s'il y a déjà quelque chose dedans.
+- Fiche : achat, garantie et anciens endroits sous « Plus de détails ».
+- « Tout montrer » dans un contenant : le contenu des boîtes et des cases s'affiche dessous, décalé. « Replier » pour revenir.
+- Recherche : l'emplacement complet écrit en entier sous chaque résultat.
+- Plus d'onglets en bas : « Tous les objets » et « Escalier » sont dans le menu en haut (icône liste), avec une flèche ← pour revenir.
+
 ## 0.7.1 — 2026-11-26
 Corrections après essai sur le téléphone.
 - Retour : le bouton retour du téléphone remonte toujours d'un cran (ferme la fiche / les réglages / la recherche, sinon remonte au contenant parent, à l'accueil il quitte). Avant, certaines pages remplacées le faisaient sauter ou bloquer. Flèche ← dans l'en-tête pour remonter aussi.

@@ -518,3 +518,38 @@ button.reg:active { background: var(--appui); }
 .fa-tire.tire::after, .fa-sep.tire::after { opacity: 1; filter: brightness(1.1); }
 .facade-zone { padding-bottom: 2px; }
 .facade-zone .fa-barre { margin-top: 22px; }
+
+/* ---------- v0.8 : simple au quotidien (ajout rapide, détails repliés, Tout montrer) ---------- */
+/* Barre d'ajout rapide, collée en bas (remplace les onglets) */
+.ajout-rapide { position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; display: flex; align-items: center; gap: 6px; max-width: 640px; margin: 0 auto;
+  padding: 7px 8px calc(7px + env(safe-area-inset-bottom)); background: var(--carte); border-top: 1px solid var(--trait); }
+.ajout-rapide[hidden] { display: none; }
+#ar-type { flex-shrink: 0; height: 38px; max-width: 92px; padding: 0 22px 0 10px; border-radius: 999px; border: 1px solid var(--trait);
+  background: var(--fond) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%236E7179' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 9px center;
+  appearance: none; -webkit-appearance: none; color: var(--accent); font: inherit; font-size: 13px; font-weight: 700; }
+#ar-nom { flex: 1; min-width: 0; height: 38px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--trait); background: var(--fond); color: var(--texte); font: inherit; font-size: 15px; }
+#ar-nom:focus { outline: none; border-color: var(--accent); background: var(--carte); }
+#ar-photo img { width: 32px; height: 32px; border-radius: 8px; object-fit: cover; }
+.ar-ok { background: var(--accent-fond); color: #fff; border-radius: 999px; }
+.ar-ok:active, .ar-ok:hover { background: var(--accent); }
+.toast { bottom: calc(66px + env(safe-area-inset-bottom)); }
+/* « Plus de détails » / « Tout montrer » : texte gris posé sur un trait */
+.plus-details { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 0; color: var(--discret); font-weight: 700; font-size: 12.5px; }
+.plus-details::before, .plus-details::after { content: ""; flex: 1; height: 1px; background: var(--trait); }
+.plus-details > span { display: inline-flex; align-items: center; gap: 4px; }
+.plus-details .ic { width: 14px; height: 14px; transition: transform .2s; }
+.plus-details[aria-expanded="true"] .ic { transform: rotate(180deg); }
+.f-plus { display: flex; flex-direction: column; gap: 10px; }
+.f-plus[hidden] { display: none; }
+.f-histo .h4 { display: flex; align-items: center; gap: 6px; padding: 4px 0; }
+.f-histo .h4 .ic { width: 14px; height: 14px; }
+/* Tout montrer : contenu des boîtes décalé dessous */
+.tout-montrer { padding: 2px 0 4px; }
+.ligne.arbre { padding-left: calc(6px + var(--niv) * 20px); min-height: 40px; }
+.ligne.arbre .vign { width: 30px; height: 30px; }
+/* Résultat de recherche : l'emplacement en entier, sur 2 lignes si besoin */
+.l-sous.chemin { white-space: normal; overflow: visible; color: var(--texte); opacity: .75; display: flex; gap: 3px; align-items: flex-start; }
+.l-sous.chemin .ic { width: 12px; height: 12px; flex-shrink: 0; margin-top: 2px; color: var(--accent); }
+/* Titre des listes « Tous les objets » / « Escalier » */
+.onglet-outils { flex-wrap: wrap; }
+.vue-titre { display: flex; align-items: center; gap: 4px; width: 100%; margin-left: -6px; font-size: 17px; }
