@@ -20,7 +20,7 @@ import { normaliserPlan, planVide, vueHTML, ouvrirEditeur, fermerEditeur, editeu
 
 // ---------- 1. Base et données ----------
 
-const VERSION = "v0.7.0";
+const VERSION = "v0.7.1";
 const NOM_APPLI = "app-inventaire";
 
 // Tout est un « élément » (lieu, pièce, meuble, boîte, objet) rangé dans un autre (parent).
@@ -105,8 +105,9 @@ function normaliserFacade(f) {
   const cols = f.cols.filter(c => c && Array.isArray(c.cases)).map(c => ({
     w: t(c.w), cases: c.cases.filter(k => k && k.id).map(k => ({ id: String(k.id), h: t(k.h), genre: GENRES[k.genre] ? k.genre : "etagere" }))
   })).filter(c => c.cases.length);
-  const ratio = Number(f.ratio) >= 0.2 && Number(f.ratio) <= 4 ? Math.round(Number(f.ratio) * 1000) / 1000 : null;   // hauteur / largeur du dessin
-  return cols.length ? { cols, ratio } : null;
+  const ratio = Number(f.ratio) >= 0.2 && Number(f.ratio) <= 4 ? Math.round(Number(f.ratio) * 1000) / 1000 : null;   // hauteur du dessin / largeur de l'écran
+  const largeur = Number(f.largeur) >= 0.25 && Number(f.largeur) < 1 ? Math.round(Number(f.largeur) * 1000) / 1000 : null;   // largeur du dessin / largeur de l'écran (rien = toute la largeur)
+  return cols.length ? { cols, ratio, largeur } : null;
 }
 
 // ---------- 2. Stockage ----------
@@ -260,13 +261,53 @@ function descendants(id) {
 }
 
 // ---------- 4. Navigation ----------
-// Chaque écran a son adresse (#dans=ID, #fiche=ID, #reglages…) : le bouton retour du
-// téléphone remonte d'un cran ou ferme la fenêtre ouverte.
+// Chaque écran a son adresse (#dans=ID, #fiche=ID, #reglages…), mais on n'empile PAS l'historique
+// du navigateur (avant, des pages remplacées faisaient sauter ou bloquer le bouton retour).
+// Le bouton retour du téléphone est intercepté et fait un « retour logique », comme un explorateur :
+// fermer ce qui est ouvert, sinon remonter au contenant parent ; à l'accueil, il quitte l'appli.
+// Technique : une entrée « socle » + une entrée « appli » ; appuyer sur retour fait passer du
+// socle à l'appli (événement popstate), on remet l'entrée appli et on fait le retour logique.
 let dansId = "";
-let aNavigue = false;
-function aller(adresse) { aNavigue = true; location.hash = adresse; }
-function remplacer(adresse) { location.replace("#" + adresse); }
-function retour() { if (aNavigue) history.back(); else remplacer(""); }
+let hashActuel = "";   // adresse de l'écran affiché (sans le #)
+let hashSous = "";     // écran de base sous une fenêtre (fiche, réglages…) : on y revient en la fermant
+const COUCHES = ["fiche", "modifier", "ajouter", "deplacer", "sortir", "verifier", "endroit", "modeles", "case", "plan", "reglages", "theme", "archive"];
+const cleDe = h => String(h).split("=")[0];
+function naviguer(adresse) {
+  if (COUCHES.includes(cleDe(adresse)) && !COUCHES.includes(cleDe(hashActuel))) hashSous = hashActuel;
+  if (history.state?.socle) history.pushState({ appli: 1 }, "", "#" + adresse);   // ré-armer le retour
+  else history.replaceState({ appli: 1 }, "", "#" + adresse);
+  router();
+}
+const aller = naviguer, remplacer = naviguer;
+// Que fait « retour » maintenant ? (null = rien, on peut quitter l'appli)
+function cibleRetour() {
+  const cle = cleDe(hashActuel);
+  if (cle === "theme" || cle === "archive") return "reglages";
+  if (COUCHES.includes(cle)) return COUCHES.includes(cleDe(hashSous)) ? "" : hashSous;
+  if ($("recherche").value.trim() || filtre) return "effacer";
+  if (onglet !== "maison") return dansId ? "dans=" + dansId : "";
+  if (dansId) {
+    const e = elements.get(dansId), p = e && elements.get(e.parent);
+    return p && !p.archive && !(p.principal && !p.parent) ? "dans=" + p.id : "";
+  }
+  return null;
+}
+function retour() {
+  if (document.querySelector(".visionneuse")) { document.querySelectorAll(".visionneuse").forEach(v => v.remove()); return true; }
+  const c = cibleRetour();
+  if (c === null) return false;
+  if (c === "effacer") { $("recherche").value = ""; filtre = ""; afficherAccueil(); return true; }
+  naviguer(c);
+  return true;
+}
+window.addEventListener("popstate", ev => {
+  if (!ev.state?.socle) return;
+  if (cibleRetour() === null && !document.querySelector(".visionneuse")) { history.back(); return; }   // accueil : on quitte
+  history.pushState({ appli: 1 }, "", "#" + hashActuel);
+  retour();
+});
+history.replaceState({ socle: 1 }, "", location.href);
+history.pushState({ appli: 1 }, "", location.href);
 
 const MODALES = ["reglages", "theme", "archive"];
 function montrer(nom) {
@@ -287,6 +328,7 @@ function fermerVoile() { cancelAnimationFrame(animEndroit); clearTimeout(animEnd
 function router() {
   if (!MODE_DEMO && !uid) return;
   const h = decodeURIComponent(location.hash.slice(1));
+  hashActuel = h;
   const [cle, val = ""] = h.split("=");
   if (MODALES.includes(cle)) {
     fermerVoile(); montrer(cle);
@@ -376,7 +418,9 @@ function facadeHTML(cols, o = {}) {
   // En mode modifier : séparateurs à tirer entre les cases, entre les colonnes, et sous le meuble
   const sepH = (ci, ki) => o.edition && ki ? `<div class="fa-sep h" data-sep="h" data-ci="${ci}" data-ki="${ki}"></div>` : "";
   const sepV = ci => o.edition && ci ? `<div class="fa-sep v" data-sep="v" data-ci="${ci}"></div>` : "";
-  return `<div class="fa-cadre${o.edition ? " edition" : ""}${o.mini ? " mini" : ""}" style="height:${H}px">` + cols.map((c, ci) => sepV(ci) + `<div class="fa-col" style="flex:${c.w}">`
+  // Le meuble (cadre + poignées) : largeur réglable (centré), hauteur réglable
+  const larg = o.mini || !o.largeur ? 100 : Math.round(o.largeur * 1000) / 10;
+  return `<div class="fa-meuble" style="width:${larg}%">` + `<div class="fa-cadre${o.edition ? " edition" : ""}${o.mini ? " mini" : ""}" style="height:${H}px">` + cols.map((c, ci) => sepV(ci) + `<div class="fa-col" style="flex:${c.w}">`
     + c.cases.map((k, ki) => {
       const e = elements.get(k.id), kids = o.mini ? [] : enfants(k.id);
       return sepH(ci, ki) + `<div class="fa-case g-${k.genre}${k.id && k.id === o.focus ? " actif" : ""}" style="flex:${k.h}"${o.mini ? "" : ` data-case="${k.id}" data-ci="${ci}" data-ki="${ki}"`}>
@@ -385,7 +429,10 @@ function facadeHTML(cols, o = {}) {
       </div>`;
     }).join("")
     + (o.edition ? `<button class="fa-plus" data-fa="ajout-case" data-ci="${ci}" aria-label="Ajouter une case">${icone("plus")}</button>` : "")
-    + `</div>`).join("") + `</div>`;
+    + `</div>`).join("") + `</div>`
+    // Poignées : à droite (largeur), en bas (hauteur), au coin (les deux d'un geste)
+    + (o.edition ? `<div class="fa-tire droite" data-sep="droite" aria-label="Largeur du meuble"></div><div class="fa-tire bas" data-sep="bas" aria-label="Hauteur du meuble"></div><div class="fa-tire coin" data-sep="coin" aria-label="Taille du meuble"></div>` : "")
+    + `</div>`;
 }
 function afficherFacade({ meuble, focus }) {
   const zone = $("facade"), cols = colonnesValides(meuble);
@@ -398,9 +445,9 @@ function afficherFacade({ meuble, focus }) {
     return;
   }
   const edition = facadeEdition === meuble.id;
-  zone.innerHTML = facadeHTML(cols, { focus, edition, ratio: meuble.facade?.ratio })
+  zone.innerHTML = facadeHTML(cols, { focus, edition, ratio: meuble.facade?.ratio, largeur: meuble.facade?.largeur })
     + (edition
-      ? `<div class="fa-sep bas" data-sep="bas" aria-label="Hauteur du meuble"></div><div class="fa-barre"><button class="btn" data-fa="colonne">${icone("plus")}Colonne</button><button class="btn" data-fa="modele">Modèle</button><button class="btn plein" data-fa="fini">${icone("check")}OK</button></div>`
+      ? `<div class="fa-barre"><button class="btn" data-fa="colonne">${icone("plus")}Colonne</button><button class="btn" data-fa="modele">Modèle</button><button class="btn plein" data-fa="fini">${icone("check")}OK</button></div>`
       : `<div class="plan-outils"><button class="btn-icone petit" data-fa="modifier" aria-label="Modifier la façade">${icone("pencil")}</button>
          <button class="btn-icone petit" data-action="plan-replier" aria-label="Replier">${icone("chevron-up")}</button></div>`);
 }
@@ -417,14 +464,19 @@ $("facade").addEventListener("pointerdown", ev => {
   let a, b;
   if (type === "h") { b = sep.nextElementSibling; a = sep.previousElementSibling; }
   if (type === "v") { b = sep.nextElementSibling; a = sep.previousElementSibling; }
-  const depart = type === "v" ? ev.clientX : ev.clientY;
+  const depart = type === "v" ? ev.clientX : ev.clientY, x0 = ev.clientX, y0 = ev.clientY;
   const ta = a ? (type === "v" ? a.offsetWidth : a.offsetHeight) : 0, tb = b ? (type === "v" ? b.offsetWidth : b.offsetHeight) : 0;
-  const H0 = cadre.offsetHeight;
+  const boite = $("facade").querySelector(".fa-meuble"), Z = $("facade").clientWidth || 364;
+  const H0 = cadre.offsetHeight, W0 = boite.offsetWidth;
   const somme = a && b ? parseFloat(a.style.flex) + parseFloat(b.style.flex) : 0;   // poids des deux voisins (inchangé)
   sep.classList.add("tire");
+  vibrer("prise");
   const bouger = e => {
     const d = (type === "v" ? e.clientX : e.clientY) - depart;
-    if (type === "bas") { cadre.style.height = Math.min(520, Math.max(90, H0 + d)) + "px"; return; }
+    // Meuble centré : le bord droit suit le doigt, donc la largeur change de 2 × le déplacement
+    if (type === "droite" || type === "coin") boite.style.width = Math.min(Z, Math.max(Z * .25, W0 + 2 * (e.clientX - x0))) + "px";
+    if (type === "bas" || type === "coin") cadre.style.height = Math.min(520, Math.max(90, H0 + e.clientY - y0)) + "px";
+    if (type === "droite" || type === "bas" || type === "coin") return;
     const na = Math.max(22, Math.min(ta + tb - 22, ta + d));
     a.style.flex = String(somme * na / (ta + tb)); b.style.flex = String(somme * (ta + tb - na) / (ta + tb));
   };
@@ -435,8 +487,10 @@ $("facade").addEventListener("pointerdown", ev => {
     sep.classList.remove("tire");
     const m = meubleFacade();
     if (!m) return;
-    if (type === "bas") {
-      ecrire([{ ...m, facade: normaliserFacade({ ...m.facade, cols: colonnesValides(m), ratio: cadre.offsetHeight / cadre.offsetWidth }) }]);
+    if (type === "droite" || type === "bas" || type === "coin") {
+      // Tailles rapportées à la largeur de l'écran (le même meuble garde sa forme sur le tel et le PC)
+      ecrire([{ ...m, facade: normaliserFacade({ ...m.facade, cols: colonnesValides(m), ratio: cadre.offsetHeight / Z, largeur: boite.offsetWidth / Z }) }]);
+      vibrer("depot");
       return;
     }
     // Nouveaux poids = tailles à l'écran, rapportées à la somme des deux poids d'avant
@@ -499,7 +553,7 @@ function majFacade(change, extra = []) {
   if (!m) return;
   const cols = JSON.parse(JSON.stringify(colonnesValides(m)));
   change(cols, m);
-  ecrire([{ ...m, facade: normaliserFacade({ cols, ratio: m.facade?.ratio }) }, ...extra]);
+  ecrire([{ ...m, facade: normaliserFacade({ cols, ratio: m.facade?.ratio, largeur: m.facade?.largeur }) }, ...extra]);
 }
 function supprimerCase(id) {
   const m = meubleFacade(), e = elements.get(id);
@@ -609,7 +663,7 @@ function afficherAccueil() {
   $("courant").hidden = !tete;
   if (tete) {
     const infos = [TYPES[tete.type].nom, ...tete.tags].join(" · ");
-    $("courant").innerHTML = `${vignette(tete)}<div class="c-txt"><b>${echapper(tete.nom)}${tete.principal ? ` ${icone("star")}` : ""}</b><span>${echapper(infos)}${tete.note ? " · " + echapper(tete.note) : ""}</span></div>
+    $("courant").innerHTML = `${cur ? `<button class="btn-icone remonter" data-action="remonter" aria-label="Remonter">${icone("arrow-left")}</button>` : ""}${vignette(tete)}<div class="c-txt"><b>${echapper(tete.nom)}${tete.principal ? ` ${icone("star")}` : ""}</b><span>${echapper(infos)}${tete.note ? " · " + echapper(tete.note) : ""}</span></div>
       <button class="btn-icone" data-fiche="${tete.id}" aria-label="Fiche">${icone("dots")}</button>`;
   }
   // Lâcher un objet glissé sur la liste (pas sur une ligne) = le ranger ici
@@ -1009,7 +1063,7 @@ function ouvrirEndroit(id) {
     <div class="f-chemin">${icone("map-pin")}<span>${echapper(cheminTexte(e) || "Tout en haut")}</span></div>
     <div class="scene" id="scene">
       ${svg ? `<div class="sc-plan">${svg}</div>` : ""}
-      ${cols.length ? `<div class="sc-facade"${svg ? " hidden" : ""}>${facadeHTML(cols, { focus: chaine[iM - 1].id, objet: e.id, ratio: meuble.facade.ratio })}</div>` : ""}
+      ${cols.length ? `<div class="sc-facade"${svg ? " hidden" : ""}>${facadeHTML(cols, { focus: chaine[iM - 1].id, objet: e.id, ratio: meuble.facade.ratio, largeur: meuble.facade.largeur })}</div>` : ""}
       ${!svg && !cols.length ? `<p class="vide">Pas de plan pour ce lieu</p>` : ""}
     </div>
     <div class="f-actions"><button class="btn plein" data-action="ouvrir">${icone("map-pin")}Y aller</button></div>`, "endroit", id);
@@ -1109,11 +1163,11 @@ document.addEventListener("click", ev => {
   const t = ev.target;
   const el = s => t.closest(s);
   let b;
-  if ((b = el("[data-aller]"))) { const a = b.dataset.aller; a === "accueil" ? remplacer("") : (MODALES.includes(a) && MODALES.includes(location.hash.slice(1)) ? remplacer(a) : aller(a)); return; }
+  if ((b = el("[data-aller]"))) { const a = b.dataset.aller; a === "accueil" ? naviguer(hashSous && !COUCHES.includes(cleDe(hashSous)) ? hashSous : "") : naviguer(a); return; }
   if ((b = el("[data-theme-choix]"))) { changerReglage("theme", b.dataset.themeChoix); window.appliquerTheme(b.dataset.themeChoix); afficherTheme(); return; }
   if ((b = el("[data-vib-choix]"))) { changerReglage("vibrations", b.dataset.vibChoix === "oui"); afficherReglages(); vibrer("succes"); return; }
   if ((b = el("[data-anim-choix]"))) { changerReglage("animations", b.dataset.animChoix); document.documentElement.dataset.anim = b.dataset.animChoix; afficherReglages(); return; }
-  if (t === $("ecran-reglages") || t === $("ecran-theme") || t === $("ecran-archive")) { remplacer(""); return; }
+  if (t === $("ecran-reglages") || t === $("ecran-theme") || t === $("ecran-archive")) { naviguer(hashSous && !COUCHES.includes(cleDe(hashSous)) ? hashSous : ""); return; }
   if ((b = el("[data-restaurer]"))) { restaurer(b.dataset.restaurer); return; }
   if ((b = el("[data-supprimer-def]"))) { supprimerDefinitif(b.dataset.supprimerDef); return; }
 
@@ -1216,6 +1270,7 @@ document.addEventListener("click", ev => {
     window.scrollTo(0, 0);
     return;
   }
+  if (el("[data-action='remonter']")) { retour(); return; }   // flèche ← : remonter d'un cran
   if (el("[data-action='nord']")) {   // boussole : le plan revient doucement au nord
     const svg = $("plan").querySelector(".plan-vue"), lieu = $("plan").dataset.lieu, r0 = Number(svg?.dataset.rot) || 0;
     noterRotation(lieu, 0);
@@ -1313,50 +1368,72 @@ $("ouvrir-notes").addEventListener("click", () => {
 });
 
 // ---------- 7. Glisser un objet vers un autre endroit ----------
-// Téléphone : appui long (0,35 s) puis glisser. PC : glisser direct à la souris.
-// Seule une étiquette (icône + nom) suit le doigt. Rester ½ s sur un endroit (fil d'Ariane,
-// contenant, pièce du plan, case) l'ouvre sans lâcher : on peut remonter puis redescendre ailleurs.
-// Un 2e doigt sur le plan le déplace / zoome pendant ce temps.
-// Le défilement est bloqué seulement une fois l'objet attrapé (touchmove non passif) :
-// avant, un doigt qui bouge = on fait défiler la liste normalement.
+// Téléphone : appui long (0,4 s) puis glisser. PC : glisser direct à la souris.
+// Au doigt on écoute les événements « touch » (et pas « pointer ») : Chrome Android peut
+// interrompre un geste « pointer » (appui long natif, début de défilement) et l'objet retombait.
+// Avec « touch », bloquer touchmove une fois l'objet attrapé suffit à garder la main.
+// Seule une étiquette (icône + nom) suit le doigt. Rester 1 s immobile sur un endroit (fil d'Ariane,
+// contenant, pièce du plan, case) l'ouvre sans lâcher (un rond se remplit) ; bouger annule.
 let glisse = null;
-const OUVRIR_APRES = 600;
+const OUVRIR_APRES = 1000;
 function brancherGlisser(zone) {
-  zone.addEventListener("pointerdown", ev => {
+  // --- Doigt ---
+  zone.addEventListener("touchstart", ev => {
+    if (ev.touches.length !== 1 || glisse) return;
     const ligne = ev.target.closest(".ligne");
-    if (!ligne || ev.target.closest("[data-plier]") || ev.button > 0 || glisse) return;
+    if (!ligne || ev.target.closest("[data-plier]")) return;
     if (zone === $("liste") && $("recherche").value.trim()) return;
-    const depart = { x: ev.clientX, y: ev.clientY }, doigt = ev.pointerId, souris = ev.pointerType === "mouse";
-    const minuteur = souris ? null : setTimeout(() => attraper(ligne, depart, doigt), 350);
+    const t0 = ev.touches[0], depart = { x: t0.clientX, y: t0.clientY }, id = t0.identifier;
+    const minuteur = setTimeout(() => attraper(ligne, depart, id), 400);
+    const trouver = e => [...e.changedTouches].find(t => t.identifier === id);
     const bouger = e => {
-      if (e.pointerId !== doigt) return;
-      if (!glisse) {
-        const loin = Math.hypot(e.clientX - depart.x, e.clientY - depart.y) > 8;
-        if (loin && souris) attraper(ligne, depart, doigt);
-        else if (loin) { clearTimeout(minuteur); finir(); return; }
-        else return;
+      const t = trouver(e);
+      if (!t) return;
+      if (!glisse) {   // avant l'appui long : un doigt qui bouge = défilement normal
+        if (Math.hypot(t.clientX - depart.x, t.clientY - depart.y) > 10) { clearTimeout(minuteur); finir(); }
+        return;
       }
+      e.preventDefault();
+      suivreGlisse({ clientX: t.clientX, clientY: t.clientY });
+    };
+    const lacher = e => {
+      if (!trouver(e)) return;
+      clearTimeout(minuteur); finir();
+      if (glisse) { e.preventDefault(); lacherGlisse(e.type === "touchend"); }
+    };
+    const finir = () => {
+      document.removeEventListener("touchmove", bouger);
+      document.removeEventListener("touchend", lacher);
+      document.removeEventListener("touchcancel", lacher);
+    };
+    document.addEventListener("touchmove", bouger, { passive: false });
+    document.addEventListener("touchend", lacher, { passive: false });
+    document.addEventListener("touchcancel", lacher);
+  }, { passive: true });
+  // --- Souris (PC) : glisser dès que la souris bouge, bouton enfoncé ---
+  zone.addEventListener("pointerdown", ev => {
+    if (ev.pointerType !== "mouse" || ev.button > 0 || glisse) return;
+    const ligne = ev.target.closest(".ligne");
+    if (!ligne || ev.target.closest("[data-plier]")) return;
+    if (zone === $("liste") && $("recherche").value.trim()) return;
+    const depart = { x: ev.clientX, y: ev.clientY };
+    const bouger = e => {
+      if (!glisse) { if (Math.hypot(e.clientX - depart.x, e.clientY - depart.y) > 8) attraper(ligne, depart, "souris"); else return; }
       suivreGlisse(e);
     };
     const lacher = e => {
-      if (e.pointerId !== doigt) return;
-      clearTimeout(minuteur); finir();
-      if (glisse) lacherGlisse(e.type === "pointerup");
-    };
-    const finir = () => {
       document.removeEventListener("pointermove", bouger);
       document.removeEventListener("pointerup", lacher);
-      document.removeEventListener("pointercancel", lacher);
+      if (glisse) lacherGlisse(e.type === "pointerup");
     };
     document.addEventListener("pointermove", bouger);
     document.addEventListener("pointerup", lacher);
-    document.addEventListener("pointercancel", lacher);
   });
+  // Appui long : pas de menu du téléphone ni de sélection de texte sur les lignes
   zone.addEventListener("contextmenu", ev => { if (ev.target.closest(".ligne")) ev.preventDefault(); });
 }
 brancherGlisser($("liste"));
 brancherGlisser($("vue-onglet"));
-document.addEventListener("touchmove", ev => { if (glisse) ev.preventDefault(); }, { passive: false });
 
 function attraper(ligne, depart, doigt) {
   const e = elements.get(ligne.dataset.id);
@@ -1379,6 +1456,8 @@ function suivreGlisse(e) {
   g.x = e.clientX; g.y = e.clientY;
   placerEtiquette();
   g.defile = g.y < 70 ? -1 : g.y > innerHeight - 140 ? 1 : 0;
+  // Le doigt bouge pendant l'attente : on recommence l'attente (il faut rester immobile pour ouvrir)
+  if (g.attente && Math.hypot(g.x - g.attente.x, g.y - g.attente.y) > 16) armerSurvol(g, g.cible);
   chercherCible();
 }
 const elementVise = c => c && (c.dataset.lien && !elements.has(c.dataset.lien) ? null : c);
@@ -1392,23 +1471,33 @@ function chercherCible() {
   const id = c ? cibleId(c) : null;
   if (c && g.interdits.has(id)) c = null;
   if (c === g.cible) return;
-  g.cible?.classList.remove("cible", "survol");
-  clearTimeout(g.minuteur);
+  g.cible?.classList.remove("cible");
   g.cible = c;
+  if (c && cibleId(c) !== (elements.get(g.id)?.parent || "")) c.classList.add("cible");
+  armerSurvol(g, c);
+}
+// Survol prolongé d'un endroit qui s'ouvre (pas la liste elle-même, pas un objet) :
+// un rond se remplit autour du doigt pendant 1 s, puis l'endroit s'ouvre.
+function armerSurvol(g, c) {
+  clearTimeout(g.minuteur);
+  g.anneau?.remove(); g.anneau = null; g.attente = null;
   if (!c) return;
-  const parent = elements.get(g.id)?.parent || "";
-  if (cibleId(c) !== parent) c.classList.add("cible");
-  // Survol prolongé d'un endroit qui s'ouvre (pas la liste elle-même, pas un objet)
   const vise = elements.get(cibleId(c));
   const ouvrable = c !== $("liste") && (c.classList.contains("fil-bout") || (vise && estContenant(vise)));
   if (!ouvrable) return;
-  c.classList.add("survol");
+  g.attente = { x: g.x, y: g.y };
+  g.anneau = document.createElement("div");
+  g.anneau.className = "anneau";
+  g.anneau.style.transform = `translate(${g.x - 28}px, ${g.y - 28}px)`;
+  g.anneau.style.animationDuration = OUVRIR_APRES + "ms";
+  document.body.appendChild(g.anneau);
   g.minuteur = setTimeout(() => {
     if (glisse !== g || g.cible !== c) return;
     const dest = cibleId(c);
     vibrer("ouvre");
+    g.anneau?.remove(); g.anneau = null; g.attente = null;
     g.cible = null;
-    remplacer(dest ? "dans=" + dest : "");
+    naviguer(dest ? "dans=" + dest : "");
     setTimeout(() => { if (glisse === g) chercherCible(); }, 80);   // la page a changé sous le doigt
   }, OUVRIR_APRES);
 }
@@ -1419,7 +1508,7 @@ function defilerAuto() {
 }
 function lacherGlisse(ok) {
   const g = glisse; glisse = null;
-  clearTimeout(g.minuteur);
+  clearTimeout(g.minuteur); g.anneau?.remove();
   // (l'étiquette est retirée par poser(), après son petit vol)
   g.ligne.classList.remove("souleve");
   document.querySelectorAll(".souleve").forEach(x => x.classList.remove("souleve"));

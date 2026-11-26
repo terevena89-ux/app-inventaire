@@ -409,11 +409,11 @@ button.reg:active { background: var(--appui); }
 .fa-cadre.edition { gap: 0; }
 .fa-cadre.edition .fa-col { gap: 0; }
 .fa-sep { flex: none; position: relative; touch-action: none; }
-.fa-sep.h { height: 10px; cursor: row-resize; }
-.fa-sep.v { width: 10px; cursor: col-resize; }
+.fa-sep.h { height: 16px; cursor: row-resize; }
+.fa-sep.v { width: 16px; cursor: col-resize; }
 .fa-sep::after { content: ""; position: absolute; border-radius: 2px; background: var(--accent); opacity: .5; }
-.fa-sep.h::after { left: 30%; right: 30%; top: 3px; height: 4px; }
-.fa-sep.v::after { top: 30%; bottom: 30%; left: 3px; width: 4px; }
+.fa-sep.h::after { left: 25%; right: 25%; top: 5px; height: 6px; }
+.fa-sep.v::after { top: 25%; bottom: 25%; left: 5px; width: 6px; }
 .fa-sep.bas { height: 18px; margin-top: -2px; cursor: row-resize; }
 .fa-sep.bas::after { left: 40%; right: 40%; top: 6px; height: 5px; }
 .fa-sep.tire::after { opacity: 1; }
@@ -498,3 +498,23 @@ button.reg:active { background: var(--appui); }
 .eclat i { position: absolute; width: 8px; height: 8px; margin: -4px; border-radius: 2px; background: var(--c); animation: eclat .8s cubic-bezier(.2,.7,.3,1) forwards; }
 @keyframes eclat { to { transform: translate(var(--dx), var(--dy)) rotate(200deg); opacity: 0; } }
 .pl-battant { stroke-width: 1.2; }
+
+/* ---------- v0.7.1 : flèche remonter, anneau de survol, façade modelable ---------- */
+.courant .remonter { margin-left: -4px; }
+.anneau { position: fixed; left: 0; top: 0; z-index: 61; width: 56px; height: 56px; border-radius: 50%; pointer-events: none;
+  background: conic-gradient(var(--accent-fond) var(--p, 0%), transparent 0); animation: remplir linear forwards;
+  -webkit-mask: radial-gradient(circle, transparent 22px, #000 23px); mask: radial-gradient(circle, transparent 22px, #000 23px); }
+@property --p { syntax: "<percentage>"; inherits: false; initial-value: 0%; }
+@keyframes remplir { to { --p: 100%; } }
+.fa-meuble { position: relative; margin: 0 auto; max-width: 100%; }
+.fa-tire { position: absolute; touch-action: none; z-index: 2; }
+.fa-tire::after { content: ""; position: absolute; background: var(--accent-fond); border-radius: 4px; }
+.fa-tire.droite { top: 20%; bottom: 20%; right: -10px; width: 24px; cursor: ew-resize; }
+.fa-tire.droite::after { left: 9px; top: 25%; bottom: 25%; width: 6px; }
+.fa-tire.bas { left: 20%; right: 20%; bottom: -14px; height: 28px; cursor: ns-resize; }
+.fa-tire.bas::after { top: 11px; left: 25%; right: 25%; height: 6px; }
+.fa-tire.coin { right: -10px; bottom: -18px; width: 40px; height: 40px; cursor: nwse-resize; }
+.fa-tire.coin::after { left: 8px; top: 8px; width: 24px; height: 24px; border-radius: 50%; border: 3px solid var(--carte); box-shadow: var(--ombre); }
+.fa-tire.tire::after, .fa-sep.tire::after { opacity: 1; filter: brightness(1.1); }
+.facade-zone { padding-bottom: 2px; }
+.facade-zone .fa-barre { margin-top: 22px; }

@@ -1,5 +1,12 @@
 # Inventaire — journal des nouveautés
 
+## 0.7.1 — 2026-11-26
+Corrections après essai sur le téléphone.
+- Retour : le bouton retour du téléphone remonte toujours d'un cran (ferme la fiche / les réglages / la recherche, sinon remonte au contenant parent, à l'accueil il quitte). Avant, certaines pages remplacées le faisaient sauter ou bloquer. Flèche ← dans l'en-tête pour remonter aussi.
+- Glisser au doigt refait avec les événements tactiles : Chrome ne peut plus l'interrompre en route ; un doigt qui défile n'attrape rien, l'appui long (0,4 s) attrape.
+- Ouvrir en survolant : 1 seconde immobile, avec un rond qui se remplit autour du doigt ; bouger annule.
+- Vue de face : un gros rond au coin pour changer largeur et hauteur du meuble d'un geste (commode étroite et haute…), une poignée à droite (largeur), une en bas (hauteur) ; barres entre les cases plus épaisses.
+
 ## 0.7.0 — 2026-11-25
 Plan et sensations.
 - Plan de l'accueil (et « Voir l'endroit ») sans noms ; portes dessinées d'un seul trait.
