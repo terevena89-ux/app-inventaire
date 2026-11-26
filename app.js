@@ -20,7 +20,7 @@ import { normaliserPlan, planVide, vueHTML, ouvrirEditeur, fermerEditeur, editeu
 
 // ---------- 1. Base et données ----------
 
-const VERSION = "v0.8.0";
+const VERSION = "v0.8.1";
 const NOM_APPLI = "app-inventaire";
 
 // Tout est un « élément » (lieu, pièce, meuble, boîte, objet) rangé dans un autre (parent).
@@ -567,7 +567,9 @@ function supprimerCase(id) {
 }
 
 // Plan au-dessus de la liste : celui du lieu (élément tout en haut), recentré sur la pièce reliée
-function afficherPlan(cur) {
+const lieuPrincipal = () => [...elements.values()].find(e => e.principal && !e.archive && !e.parent && e.type === "lieu");
+// accueil : le plan du lieu principal ne se replie pas (c'est le chemin vers les pièces)
+function afficherPlan(cur, accueil) {
   const zone = $("plan");
   const lieu = cur ? (ancetres(cur)[0] || cur) : null;
   if (!lieu || (planVide(lieu.plan) && cur.id !== lieu.id)) { zone.hidden = true; return; }
@@ -578,7 +580,7 @@ function afficherPlan(cur) {
     return;
   }
   zone.className = "plan-zone";
-  if (reglages.planReplie) {
+  if (reglages.planReplie && !accueil) {
     zone.innerHTML = `<button class="plan-replie" data-action="plan-replier"><span class="h4">Plan</span>${icone("chevron-down")}</button>`;
     return;
   }
@@ -589,7 +591,7 @@ function afficherPlan(cur) {
     // Boussole (comme une carte) : visible quand le plan est tourné ; la toucher remet le nord en haut
     + `<button class="boussole" data-action="nord" aria-label="Remettre le nord en haut"${Math.abs(rot) < 1 ? " hidden" : ""}><svg viewBox="0 0 24 24" style="transform:rotate(${rot}deg)"><path class="b-nord" d="M12 3l4 9h-8z"/><path class="b-sud" d="M12 21l-4-9h8z"/></svg></button>`
     + `<div class="plan-outils"><button class="btn-icone petit" data-plan-edit="${lieu.id}" aria-label="Modifier le plan">${icone("pencil")}</button>
-       <button class="btn-icone petit" data-action="plan-replier" aria-label="Replier">${icone("chevron-up")}</button></div>`;
+       ${accueil ? "" : `<button class="btn-icone petit" data-action="plan-replier" aria-label="Replier">${icone("chevron-up")}</button>`}</div>`;
 }
 window.addEventListener("hashchange", router);
 
@@ -641,6 +643,9 @@ let toutMontrer = false;   // « Tout montrer » : reste actif d'un contenant à
 const ar = { dans: null, photo: "" };
 function majAjoutRapide(tete) {
   $("ajout-rapide").hidden = false;
+  // Accueil : pas de saisie directe, un bouton qui ouvre la fenêtre d'ajout (choix du type d'abord)
+  $("ajout-rapide").classList.toggle("accueil", !tete);
+  if (!tete) { ar.dans = null; return; }
   const id = tete ? tete.id : "";
   if (ar.dans !== id) {   // nouvel endroit : type deviné à nouveau
     ar.dans = id;
@@ -684,22 +689,24 @@ function afficherAccueil() {
   if (autre) {
     ["fil", "courant", "plan", "facade", "filtres"].forEach(i => { $(i).hidden = true; });
     if (onglet === "objets") afficherObjets(q); else afficherEscalier();
-    // Titre avec flèche ← (ces listes s'ouvrent depuis le menu en haut)
-    $("onglet-outils").insertAdjacentHTML("afterbegin", `<div class="vue-titre"><button class="btn-icone" data-action="remonter" aria-label="Retour">${icone("arrow-left")}</button><b>${onglet === "objets" ? "Tous les objets" : "Escalier"}</b></div>`);
+    // Titre « Tout » avec flèche ← et le choix du mode
+    $("onglet-outils").insertAdjacentHTML("afterbegin", `<div class="vue-titre"><button class="btn-icone" data-action="remonter" aria-label="Retour">${icone("arrow-left")}</button><b>Tout</b>
+      <div class="seg">${[["objets", "Objets"], ["escalier", "Escalier"]].map(([k, n]) => `<button data-onglet="${k}" aria-pressed="${k === onglet}">${n}</button>`).join("")}</div></div>`);
     return;
   }
   const cur0 = elements.get(dansId);
   afficherFiltres(!cur0 || !!filtre);
   if (q || filtre) { $("plan").hidden = $("facade").hidden = true; afficherResultats(q); return; }
   const cur = cur0;
-  // Accueil : le lieu marqué « principal » (étoile) montre son plan et ses pièces ; les autres lieux en dessous
-  const principal = cur ? null : [...elements.values()].find(e => e.principal && !e.archive && !e.parent);
+  // Accueil : le lieu principal (choisi dans Réglages) montre seulement son plan (toucher une pièce l'ouvre),
+  // puis la liste des autres lieux. Sans lieu principal : la liste de tous les lieux.
+  const principal = cur ? null : lieuPrincipal();
   // Dans un meuble (ou une de ses cases) : sa façade à la place du plan
   const fac = trouverFacade(cur);
   $("facade").hidden = !fac;
-  if (fac) { $("plan").hidden = true; afficherFacade(fac); } else afficherPlan(cur || principal);
+  if (fac) { $("plan").hidden = true; afficherFacade(fac); } else afficherPlan(cur || principal, !cur);
   const fil = cur ? [...ancetres(cur), cur] : [];
-  $("fil").hidden = false;
+  $("fil").hidden = !cur;
   $("fil").innerHTML = `<button class="fil-bout" data-dans="">${icone("home")}Tout</button>`
     + fil.map(a => `<span class="sep">›</span><button class="fil-bout" data-dans="${a.id}">${echapper(a.nom)}</button>`).join("");
   $("fil").scrollLeft = $("fil").scrollWidth;
@@ -711,17 +718,17 @@ function afficherAccueil() {
       <button class="btn-icone" data-fiche="${tete.id}" aria-label="Fiche">${icone("dots")}</button>`;
   }
   // Lâcher un objet glissé sur la liste (pas sur une ligne) = le ranger ici
-  $("liste").dataset.depot = tete ? tete.id : "";
-  const liste = enfants(tete ? tete.id : "");
+  $("liste").dataset.depot = cur ? cur.id : "";
+  const liste = principal ? [] : enfants(cur ? cur.id : "");
   const autres = principal ? enfants("").filter(e => e.id !== principal.id) : [];
   // « Tout montrer » : seulement s'il y a des boîtes (ou meubles…) qui contiennent quelque chose
-  const aDeplier = tete && liste.some(e => enfants(e.id).length);
+  const aDeplier = cur && liste.some(e => enfants(e.id).length);
   const arbre = (id, niv) => enfants(id).flatMap(e => [ligneHTML(e, false, niv), ...arbre(e.id, niv + 1)]);
   $("liste").innerHTML = (aDeplier ? `<button class="plus-details tout-montrer" data-action="tout-montrer" aria-expanded="${toutMontrer}"><span><span>${toutMontrer ? "Replier" : "Tout montrer"}</span>${icone("chevron-down")}</span></button>` : "")
-    + (liste.length ? (aDeplier && toutMontrer ? arbre(tete.id, 0).join("") : liste.map(e => ligneHTML(e, false)).join(""))
-      : `<div class="vide">${tete ? "Vide" : "Rien pour l'instant"}</div>`)
+    + (liste.length ? (aDeplier && toutMontrer ? arbre(cur.id, 0).join("") : liste.map(e => ligneHTML(e, false)).join(""))
+      : principal ? "" : `<div class="vide">${cur ? "Vide" : "Rien pour l'instant"}</div>`)
     + (autres.length ? `<div class="groupe-titre h4">Autres lieux</div>` + autres.map(e => ligneHTML(e, false)).join("") : "");
-  majAjoutRapide(tete);
+  majAjoutRapide(cur);
   if (aSurligner) {
     const l = $("liste").querySelector(`[data-id="${aSurligner}"]`);
     if (l) { l.classList.add("eclair"); l.scrollIntoView({ block: "center" }); }
@@ -824,7 +831,6 @@ function ouvrirFiche(id) {
         <div class="menu" hidden>
           <button data-action="modifier">${icone("pencil")}Modifier</button>
           ${kids.length ? `<button data-action="verifier">${icone("check")}Vérifier le contenu</button>` : ""}
-          ${e.type === "lieu" && !e.parent ? `<button data-action="principal">${icone("star")}${e.principal ? "Plus lieu principal" : "Lieu principal"}</button>` : ""}
           <button data-action="sortir" class="danger">${icone("archive")}Sortir de l'inventaire</button>
         </div></div>
       <button class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button>
@@ -879,6 +885,10 @@ function tousLesTags() {
   for (const e of elements.values()) for (const t of e.tags) n.set(t, (n.get(t) || 0) + 1);
   return [...n.keys()].sort((a, b) => n.get(b) - n.get(a));
 }
+// Depuis l'accueil : un lieu va tout en haut, un objet aussi (il tombe dans « À ranger ») ;
+// une pièce, un meuble, une boîte… vont dans le lieu principal.
+const parentAccueil = type => type === "lieu" || type === "objet" ? "" : lieuPrincipal()?.id || "";
+const ouTexte = () => { const p = elements.get(form.parent); return p ? echapper(cheminComplet(p)) : form.type === "objet" ? "À ranger" : "Tout en haut"; };
 function ouvrirFormulaire(e, parent, typeImpose) {
   if (e === undefined) { fermerVoile(); return; }   // #modifier= d'un élément disparu
   const neuf = !e;
@@ -889,15 +899,20 @@ function ouvrirFormulaire(e, parent, typeImpose) {
   const a = e?.achat || {};
   // Détails (type, note, tags, couleur, pastilles, quantité, achat) repliés, sauf s'il y a déjà quelque chose dedans
   const ouvert = !!e && !!(e.note || e.tags.length || e.couleur || e.etat || e.mobile || e.quantite != null || e.achat);
+  // Ajout depuis l'accueil : le type se choisit d'abord, et l'endroit en dépend (voir parentAccueil)
+  form.accueil = neuf && !parentEl;
+  if (form.accueil) form.parent = parentAccueil(form.type);
+  const types = `<div class="types">${ORDRE_TYPES.map(t => `<button type="button" data-type="${t}" aria-pressed="${t === form.type}">${icone(TYPES[t].ic)}${TYPES[t].nom}</button>`).join("")}</div>`;
   ouvrirVoile(`<form id="form" autocomplete="off">
     <div class="f-tete"><h2>${neuf ? "Ajouter" : "Modifier"}</h2>
       <button type="button" class="btn-icone" data-action="fermer" aria-label="Fermer">${icone("x")}</button></div>
-    <div class="f-ou">${icone("map-pin")}<span>${parentEl ? echapper(cheminComplet(parentEl)) : "Tout en haut"}</span></div>
+    ${form.accueil ? types : ""}
+    <div class="f-ou">${icone("map-pin")}<span>${ouTexte()}</span></div>
     <input id="f-nom" class="champ" placeholder="Nom" maxlength="80" value="${echapper(e?.nom || "")}" enterkeyhint="done">
     <div class="photo-zone" id="f-photo"></div>
     ${plusDetailsHTML(ouvert)}
     <div class="f-plus"${ouvert ? "" : " hidden"}>
-    <div class="types">${ORDRE_TYPES.map(t => `<button type="button" data-type="${t}" aria-pressed="${t === form.type}">${icone(TYPES[t].ic)}${TYPES[t].nom}</button>`).join("")}</div>
+    ${form.accueil ? "" : types}
     <textarea id="f-note" class="champ" rows="2" placeholder="Note">${echapper(e?.note || "")}</textarea>
     <input id="f-tags" class="champ" placeholder="Tags, séparés par des virgules" value="${echapper((e?.tags || []).join(", "))}">
     <div class="suggestions" id="f-sugg"></div>
@@ -959,7 +974,7 @@ function enregistrerFormulaire(autre) {
   vibrer("succes"); feterCoche();
   if (autre) {   // saisie à la chaîne : même endroit, même type
     afficherToast(`Ajouté : ${nom}`, null);
-    ouvrirFormulaire(null, form.parent, form.type);
+    ouvrirFormulaire(null, form.accueil ? "" : form.parent, form.type);
   } else retour();
 }
 
@@ -1030,8 +1045,16 @@ function afficherReglages() {
   document.querySelectorAll("[data-anim-choix]").forEach(b => b.setAttribute("aria-pressed", b.dataset.animChoix === reglages.animations));
   document.querySelectorAll("[data-vib-choix]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.vibChoix === "oui") === String(reglages.vibrations !== false)));
   $("btn-deconnexion").hidden = MODE_DEMO;
+  // Lieu principal : son plan est sur l'accueil (synchronisé, c'est une donnée du lieu)
+  const lieux = enfants("").filter(e => e.type === "lieu"), p = lieuPrincipal();
+  $("choix-principal").innerHTML = `<option value="">Aucun</option>` + lieux.map(e => `<option value="${e.id}"${e === p ? " selected" : ""}>${echapper(e.nom)}</option>`).join("");
   majSynchro();
 }
+$("choix-principal").addEventListener("change", ev => {
+  const id = ev.target.value;
+  ecrire([...elements.values()].filter(x => x.principal !== (x.id === id)).map(x => ({ ...x, principal: x.id === id })));
+  vibrer("succes");
+});
 function afficherTheme() {
   document.querySelectorAll("[data-theme-choix]").forEach(b => b.setAttribute("aria-pressed", b.dataset.themeChoix === reglages.theme));
 }
@@ -1316,7 +1339,12 @@ document.addEventListener("click", ev => {
     }
     if ((b = el("[data-vers]"))) { $("recherche").value = ""; remplacer("dans=" + b.dataset.vers); return; }
     if ((b = el("[data-tag]"))) { $("recherche").value = "#" + b.dataset.tag; remplacer(""); return; }
-    if ((b = el("[data-type]"))) { form.type = b.dataset.type; $("voile").querySelectorAll("[data-type]").forEach(x => x.setAttribute("aria-pressed", x === b)); return; }
+    if ((b = el("[data-type]"))) {
+      form.type = b.dataset.type;
+      $("voile").querySelectorAll("[data-type]").forEach(x => x.setAttribute("aria-pressed", x === b));
+      if (form.accueil) { form.parent = parentAccueil(form.type); $("voile").querySelector(".f-ou span").innerHTML = ouTexte(); }
+      return;
+    }
     if ((b = el("[data-sugg]"))) {
       const v = $("f-tags").value.trim().replace(/,\s*$/, "");
       $("f-tags").value = (v ? v + ", " : "") + b.dataset.sugg;
@@ -1327,13 +1355,12 @@ document.addEventListener("click", ev => {
   }
 
   // Accueil
-  // Menu des listes (Tous les objets, Escalier) : s'ouvre avec le bouton en haut, se ferme au toucher suivant
-  if (t.closest("#btn-vues")) { $("menu-vues").hidden = !$("menu-vues").hidden; return; }
-  $("menu-vues").hidden = true;
+  // Section « Tout » (icône liste en haut) : Objets ou Escalier, le dernier mode choisi est retenu
+  if (t.closest("#btn-vues")) { naviguer(reglages.vueTout === "escalier" ? "escalier" : "objets"); window.scrollTo(0, 0); return; }
   if ((b = el("[data-onglet]"))) {
     const k = b.dataset.onglet;
-    if (k === onglet && k === "maison") { $("recherche").value = ""; remplacer(""); return; }   // 2e toucher sur Maison = retour à l'accueil
-    remplacer(k === "maison" ? (dansId ? "dans=" + dansId : "") : k);
+    changerReglage("vueTout", k);
+    remplacer(k);
     window.scrollTo(0, 0);
     return;
   }
@@ -1389,6 +1416,7 @@ document.addEventListener("click", ev => {
   }
   if (el("[data-action='tout-montrer']")) { toutMontrer = !toutMontrer; vibrer("tic"); afficherAccueil(); return; }
   if (t.closest("#ar-photo")) { $("ar-fichier").click(); return; }
+  if (el("[data-action='ajouter-popup']")) { aller("ajouter="); return; }
   if ((b = el(".ligne"))) {
     const e = elements.get(b.dataset.id);
     if (!e) return;

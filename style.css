@@ -553,3 +553,9 @@ button.reg:active { background: var(--appui); }
 /* Titre des listes « Tous les objets » / « Escalier » */
 .onglet-outils { flex-wrap: wrap; }
 .vue-titre { display: flex; align-items: center; gap: 4px; width: 100%; margin-left: -6px; font-size: 17px; }
+/* v0.8.1 : accueil = plan du lieu principal + autres lieux ; bouton Ajouter ; section Tout */
+.ar-popup { display: none; }
+.ajout-rapide.accueil > :not(.ar-popup) { display: none; }
+.ajout-rapide.accueil .ar-popup { display: inline-flex; flex: 1; border-radius: 999px; }
+.vue-titre .seg { margin-left: auto; }
+.reg-select { max-width: 55%; height: 34px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--trait); background: var(--fond); color: var(--texte); font: inherit; font-size: 14px; }

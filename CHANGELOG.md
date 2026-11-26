@@ -1,5 +1,12 @@
 # Inventaire — journal des nouveautés
 
+## 0.8.1 — 2026-11-26
+Accueil épuré.
+- Accueil : seulement le lieu principal avec son plan (toucher une pièce l'ouvre), puis les autres lieux. Pas de plan dessiné : bouton « Dessiner le plan ». Le plan de l'accueil ne se replie plus.
+- Lieu principal choisi dans Réglages › Accueil (plus dans le menu « ⋯ » des fiches).
+- Accueil : bouton « Ajouter » qui ouvre la fenêtre d'ajout avec le type en haut ; l'endroit suit le type (lieu et objet tout en haut, l'objet allant dans « À ranger » ; pièce, meuble, boîte dans le lieu principal).
+- Une seule section « Tout » (icône en haut) avec deux modes, Objets et Escalier ; le dernier mode choisi est retenu.
+
 ## 0.8.0 — 2026-11-26
 Plus simple au quotidien : noter vite, retrouver, regarder.
 - Barre « Ajouter dans … » en bas de l'écran : taper un nom, Entrée, c'est rangé ici ; le clavier reste ouvert pour le suivant. Type deviné (pièce, meuble, objet…), changeable à gauche ; bouton photo ; « Annuler » juste après.

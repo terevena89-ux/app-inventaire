@@ -42,11 +42,7 @@
 <section id="ecran-accueil" class="ecran" hidden>
   <header class="barre">
     <h1 class="logo">Inventaire</h1>
-    <div class="menu-wrap"><button class="btn-icone" id="btn-vues" aria-label="Listes"><svg class="ic"><use href="icones/icones.svg#objets"></use></svg></button>
-      <div class="menu" id="menu-vues" hidden>
-        <button data-onglet="objets"><svg class="ic"><use href="icones/icones.svg#objets"></use></svg>Tous les objets</button>
-        <button data-onglet="escalier"><svg class="ic"><use href="icones/icones.svg#escalier"></use></svg>Escalier (tout l'arbre)</button>
-      </div></div>
+    <button class="btn-icone" id="btn-vues" aria-label="Tout voir"><svg class="ic"><use href="icones/icones.svg#objets"></use></svg></button>
     <button class="btn-icone" data-aller="reglages" aria-label="Réglages"><svg class="ic"><use href="icones/icones.svg#settings"></use></svg></button>
   </header>
   <div class="recherche">
@@ -71,6 +67,7 @@
     <button type="button" class="btn-icone" id="ar-photo" aria-label="Photo"><svg class="ic"><use href="icones/icones.svg#camera"></use></svg></button>
     <button type="submit" class="btn-icone ar-ok" id="ar-ok" aria-label="Ajouter" hidden><svg class="ic"><use href="icones/icones.svg#plus"></use></svg></button>
     <input type="file" id="ar-fichier" accept="image/*" hidden>
+    <button type="button" class="btn plein ar-popup" data-action="ajouter-popup"><svg class="ic"><use href="icones/icones.svg#plus"></use></svg>Ajouter</button>
   </form>
 </section>
 
@@ -83,6 +80,10 @@
       <div class="reg"><span id="compte-info" class="resume"></span>
         <span class="synchro"><svg class="ic"><use href="icones/icones.svg#cloud-check"></use></svg><span class="synchro-texte">Synchronisé</span></span></div>
       <button class="reg" id="btn-deconnexion"><span>Se déconnecter</span><svg class="ic"><use href="icones/icones.svg#logout"></use></svg></button>
+    </div>
+    <div class="sect">Accueil</div>
+    <div class="groupe">
+      <label class="reg"><span>Lieu principal</span><select id="choix-principal" class="reg-select"></select></label>
     </div>
     <div class="sect">Apparence</div>
     <div class="groupe">
